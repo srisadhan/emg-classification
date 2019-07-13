@@ -1,0 +1,28 @@
+# EEG data parameters
+epoch_length:           1
+n_freqs:                6
+n_electrodes:           8
+n_class:                4
+freq_bands:             [[4, 7], [8, 10], [11, 13], [14, 22], [23, 35], [35, 45]]
+##---------------------------------------------------------------------##
+# Neural network parameters
+OUTPUT:                 3
+NUM_EPOCHS:             200
+BATCH_SIZE:             64
+LEARNING_RATE:          0.001
+TEST_SIZE:              0.15
+##---------------------------------------------------------------------##
+# Experiment 0
+# All subjects are used for training and testing
+subjects:               ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820','8821','8822', '8823', '8824']
+test_subjects:          []
+trials:                 ['HighFine', 'HighGross', 'LowFine', 'LowGross']
+
+# Path
+raw_emg_path:           'data/raw/'
+raw_emg_data:           'data/interim/raw_emg_exp_0_dataset.h5'
+clean_emg_data:         'data/processed/clean_emg_exp_0_dataset.h5'
+torch_dataset:          'data/processed/torch_exp_0_dataset.h5'
+trained_model_path:     'models/experiment_0'
+balanced_torch_dataset: 'data/processed/balanced_torch_exp_0_dataset.h5'
+##---------------------------------------------------------------------##
