@@ -6,6 +6,7 @@ import mne
 import numpy as np
 import pandas as pd
 import yaml
+import deepdish as dd
 
 
 def get_trial_path(subject, trial, config):

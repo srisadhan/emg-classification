@@ -19,21 +19,21 @@ with skip_run('skip', 'create_emg_data') as check, check():
     save_path = Path(__file__).parents[1] / config['raw_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'create_epoch_data') as check, check():
-    data = clean_emg_data(config['subjects'], config['trials'], config)
+with skip_run('run', 'create_epoch_data') as check, check():
+    data = create_emg_epoch(config['subjects'], config['trials'], config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['epoch_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'clean_epoch_data') as check, check():
-    data = clean_emg_data(config['subjects'], config['trials'], config)
+with skip_run('run', 'clean_epoch_data') as check, check():
+    data = clean_epoch_data(config['subjects'], config['trials'], config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['clean_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'pooled_data_svm') as check, check():
+with skip_run('run', 'pooled_data_svm') as check, check():
     # Load main data
     features, labels, leave_tags = subject_pooled_data(config)
 
