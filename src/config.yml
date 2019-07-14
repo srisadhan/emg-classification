@@ -12,6 +12,7 @@ NUM_EPOCHS:             200
 BATCH_SIZE:             64
 LEARNING_RATE:          0.001
 TEST_SIZE:              0.15
+DROP_OUT:               0.10
 ##---------------------------------------------------------------------##
 # Experiment 0
 # All subjects are used for training and testing
