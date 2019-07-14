@@ -43,6 +43,7 @@ def calculate_accuracy(model, data_iterator, key):
         total = 0
         length = 0
         for x, y in data_iterator[key]:
+            model.eval()
             out_put = model(x.to(device))
             out_put = out_put.cpu().detach()
             total += (out_put.argmax(dim=1) == y.argmax(dim=1)).float().sum()

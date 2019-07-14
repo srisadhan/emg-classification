@@ -51,7 +51,7 @@ with skip_run('skip', 'pooled_data_svm') as check, check():
     clf = svm_tangent_space_classifier(data['train_x'], data['train_y'])
     svm_tangent_space_prediction(clf, data['test_x'], data['test_y'])
 
-with skip_run('skip', 'pooled_data_svm_cross_validated') as check, check():
+with skip_run('run', 'pooled_data_svm_cross_validated') as check, check():
     # Load main data
     features, labels, leave_tags = subject_pooled_data(config)
 
@@ -59,6 +59,6 @@ with skip_run('skip', 'pooled_data_svm_cross_validated') as check, check():
     data = train_test_data(features, labels, leave_tags, config)
     svm_tangent_space_cross_validate(data)
 
-with skip_run('run', 'pooled_data_torch') as check, check():
+with skip_run('skip', 'pooled_data_torch') as check, check():
     dataset = pooled_data_iterator(config)
     train_torch_model(ShallowERPNet, config, dataset)

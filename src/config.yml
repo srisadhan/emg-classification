@@ -8,7 +8,7 @@ sfreq:                  200
 ##---------------------------------------------------------------------##
 # Neural network parameters
 OUTPUT:                 3
-NUM_EPOCHS:             200
+NUM_EPOCHS:             150
 BATCH_SIZE:             64
 LEARNING_RATE:          0.001
 TEST_SIZE:              0.15

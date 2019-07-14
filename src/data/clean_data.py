@@ -109,7 +109,7 @@ def clean_epoch_data(subjects, trials, config):
             y_temp = np.concatenate((y_temp, y_array), axis=0)
 
         # Append to the big dataset
-        features_dataset['subject_' + subject]['features'] = np.float16(x_temp)
-        features_dataset['subject_' + subject]['labels'] = np.float16(y_temp)
+        features_dataset['subject_' + subject]['features'] = np.float32(x_temp)
+        features_dataset['subject_' + subject]['labels'] = np.float32(y_temp)
 
     return features_dataset

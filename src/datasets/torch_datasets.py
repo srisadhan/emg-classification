@@ -16,7 +16,7 @@ class SubjectSpecificDataset(Dataset):
     Parameters
     ----------
     x : array
-        Input array of the .
+        Input array of the features.
 
     Attributes
     ----------
