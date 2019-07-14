@@ -9,71 +9,109 @@ import pandas as pd
 import deepdish as dd
 
 
-def create_emg_epoch(raw_emg, time, config):
-    """Create the epoch data from raw data.
+
+def one_hot_encode(label_length, category):
+    """Generate one hot encoded value of required length and category.
+
+    Parameters
+    ----------
+    label_length : int
+        required lenght of the array.
+    category : int
+        Caterory e.g: category=2, [0, 1, 0] in 3 class system
+
+    Returns
+    -------
+    array
+        One hot encoded array.
+
+    """
+    y = np.zeros((label_length, len(category)))
+    y[:, category.index(1)] = 1
+
+    return y
+
+
+def convert_to_array(subject, trial, config):
+    """Converts the edf files in eeg and robot dataset into arrays.
 
     Parameter
     ----------
-    raw_emg : mne raw object
-        String of subject ID e.g. 7707
-    time : list
-        A list with start and end time
+    subject : str
+        String of subject ID e.g. 0001.
+    trial : str
+        Trail e.g. HighFine, LowGross.
     config : yaml
-        The configuration file
+        The configuration file.
 
     Returns
-    ----------
-    mne epoch data
-        A data (dict) of all the subjects with different conditions
+    -------
+    array
+        An array of feature (x) and lables (y)
 
     """
 
-    raw_cropped = raw_emg.copy().crop(tmin=time[0], tmax=time[1])
-    events = mne.make_fixed_length_events(raw_cropped,
-                                          duration=config['epoch_length'])
-    epochs = mne.Epochs(raw_cropped,
-                        events,
-                        tmin=0,
-                        tmax=config['epoch_length'],
-                        verbose=False)
-    return epochs
-
-
-def clean_emg_data(subjects, trials, config):
-    """Create the data with each subject data in a dictionary.
-
-    Parameter
-    ----------
-    subject : list
-        String of subject ID e.g. 7707
-    error_type : list
-        Types of trials i.e., e.g. HighFine.
-    config : yaml
-        The configuration file
-
-    Returns
-    ----------
-    dict
-        A data (dict) of all the subjects with different conditions
-
-    """
-
-    # Empty dictionary
-    emg_epochs = {}
+    # Read path
+    emg_path = str(Path(__file__).parents[2] / config['epoch_emg_data'])
 
     # Load the data
-    read_path = Path(__file__).parents[2] / config['raw_emg_data']
-    data = dd.io.load(str(read_path))
+    data = dd.io.load(emg_path, group='/' + 'subject_' + subject)
+    epochs = data['emg'][trial]
 
-    # Loop over all subjects and error types
+    # Get array data
+    x_array = epochs.get_data()
+
+    if trial == 'HighFine':
+        category = [1, 0, 0]
+    if trial == 'LowGross':
+        category = [0, 1, 0]
+    if (trial == 'HighGross') or (trial == 'LowFine'):
+        category = [0, 0, 1]
+
+    # In order to accomodate testing
+    try:
+        y_array = one_hot_encode(x_array.shape[0], category)
+    except:
+        y_array = np.zeros((x_array.shape[0], 3))
+
+    return x_array, y_array
+
+
+def clean_epoch_data(subjects, trials, config):
+    """Create feature dataset for all subjects.
+
+    Parameter
+    ----------
+    subject : str
+        String of subject ID e.g. 0001.
+    trials : list
+        A list of differet trials
+
+    Returns
+    -------
+    tensors
+        All the data from subjects with labels.
+
+    """
+    # Initialize the numpy array to store all subject's data
+    features_dataset = collections.defaultdict(dict)
+
+    # Parameters
+    epoch_length= config['epoch_length']
+    sfreq = config['sfreq']
+
     for subject in subjects:
-        temp = collections.defaultdict(dict)
+        # Initialise for each subject
+        x_temp = np.empty((0, config['n_electrodes'], epoch_length*sfreq))
+        y_temp = np.empty((0, config['n_class']))
         for trial in trials:
-            raw_emg = data['subject_' + subject]['emg'][trial]
-            time = data['subject_' + subject]['time'][trial]
+            # Concatenate the data corresponding to all trials types
+            x_array, y_array = convert_to_array(subject, trial, config)
+            x_temp = np.concatenate((x_temp, x_array), axis=0)
+            y_temp = np.concatenate((y_temp, y_array), axis=0)
 
-            # Create epoch data
-            temp['emg'][trial] = create_emg_epoch(raw_emg, time, config)
-        emg_epochs['subject_' + subject] = temp
+        # Append to the big dataset
+        features_dataset['subject_' + subject]['features'] = np.float16(x_temp)
+        features_dataset['subject_' + subject]['labels'] = np.float16(y_temp)
 
-    return emg_epochs
+    return features_dataset
