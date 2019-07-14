@@ -1,13 +1,11 @@
-import yaml
 import collections
 from pathlib import Path
 
+import deepdish as dd
 import mne
 import numpy as np
 import pandas as pd
-
-import deepdish as dd
-
+import yaml
 
 
 def one_hot_encode(label_length, category):
@@ -97,12 +95,12 @@ def clean_epoch_data(subjects, trials, config):
     features_dataset = collections.defaultdict(dict)
 
     # Parameters
-    epoch_length= config['epoch_length']
+    epoch_length = config['epoch_length']
     sfreq = config['sfreq']
 
     for subject in subjects:
         # Initialise for each subject
-        x_temp = np.empty((0, config['n_electrodes'], epoch_length*sfreq))
+        x_temp = np.empty((0, config['n_electrodes'], epoch_length * sfreq))
         y_temp = np.empty((0, config['n_class']))
         for trial in trials:
             # Concatenate the data corresponding to all trials types

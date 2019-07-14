@@ -1,12 +1,11 @@
-import yaml
 import collections
+from datetime import datetime
 from pathlib import Path
 
 import mne
 import numpy as np
 import pandas as pd
-
-from datetime import datetime
+import yaml
 
 
 def get_trial_path(subject, trial, config):

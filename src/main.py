@@ -5,6 +5,8 @@ import yaml
 
 from data.clean_data import clean_epoch_data
 from data.create_data import create_emg_data, create_emg_epoch
+from datasets.riemann_datasets import subject_pooled_data, train_test_data
+from models.riemann_models import *
 from utils import *
 
 # The configuration file
@@ -24,9 +26,28 @@ with skip_run('skip', 'create_epoch_data') as check, check():
     save_path = Path(__file__).parents[1] / config['epoch_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('run', 'clean_epoch_data') as check, check():
+with skip_run('skip', 'clean_epoch_data') as check, check():
     data = clean_emg_data(config['subjects'], config['trials'], config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['clean_emg_data']
     save_data(str(save_path), data, save=True)
+
+with skip_run('skip', 'pooled_data_svm') as check, check():
+    # Load main data
+    features, labels, leave_tags = subject_pooled_data(config)
+
+    # Get the data
+    data = train_test_data(features, labels, leave_tags, config)
+
+    # Train the classifier and predict on test data
+    clf = svm_tangent_space_classifier(data['train_x'], data['train_y'])
+    svm_tangent_space_prediction(clf, data['test_x'], data['test_y'])
+
+with skip_run('skip', 'pooled_data_svm_cross_validated') as check, check():
+    # Load main data
+    features, labels, leave_tags = subject_pooled_data(config)
+
+    # Get the data
+    data = train_test_data(features, labels, leave_tags, config)
+    svm_tangent_space_cross_validate(data)
