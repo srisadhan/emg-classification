@@ -3,7 +3,9 @@ import yaml
 from pathlib import Path
 from contextlib import contextmanager
 
+import torch
 import deepdish as dd
+from datetime import datetime
 
 
 class SkipWith(Exception):
@@ -73,5 +75,27 @@ def save_data(path, dataset, save):
     """
     if save:
         dd.io.save(path, dataset)
+
+    return None
+
+
+def save_trained_pytorch_model(trained_model, trained_model_info, save_path):
+    """Save pytorch model and info.
+
+    Parameters
+    ----------
+    trained_model : pytorch model
+    trained_model_info : dict
+    save_path : str
+
+    """
+
+    time_stamp = datetime.now().strftime("%Y_%b_%d_%H_%M_%S")
+    torch.save(trained_model, save_path + '/model_' + time_stamp + '.pth')
+    torch.save(trained_model_info,
+               save_path + '/model_info_' + time_stamp + '.pth')
+    # Save time also
+    with open(save_path + '/time.txt', "a") as f:
+        f.write(time_stamp + '\n')
 
     return None

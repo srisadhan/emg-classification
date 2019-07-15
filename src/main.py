@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sb
 import yaml
+from pathlib import Path
 
 from data.clean_data import clean_epoch_data
 from data.create_data import create_emg_data, create_emg_epoch
@@ -14,7 +15,7 @@ from models.riemann_models import (svm_tangent_space_classifier,
 from models.torch_models import train_torch_model
 from models.torch_networks import ShallowERPNet
 
-from utils import *
+from utils import skip_run, save_trained_pytorch_model
 
 # The configuration file
 config = yaml.load(open('config.yml'), Loader=yaml.SafeLoader)
@@ -51,7 +52,7 @@ with skip_run('skip', 'pooled_data_svm') as check, check():
     clf = svm_tangent_space_classifier(data['train_x'], data['train_y'])
     svm_tangent_space_prediction(clf, data['test_x'], data['test_y'])
 
-with skip_run('run', 'pooled_data_svm_cross_validated') as check, check():
+with skip_run('skip', 'pooled_data_svm_cross_validated') as check, check():
     # Load main data
     features, labels, leave_tags = subject_pooled_data(config)
 
@@ -62,3 +63,18 @@ with skip_run('run', 'pooled_data_svm_cross_validated') as check, check():
 with skip_run('skip', 'pooled_data_torch') as check, check():
     dataset = pooled_data_iterator(config)
     train_torch_model(ShallowERPNet, config, dataset)
+
+with skip_run('run', 'pooled_data_torch_save') as check, check():
+
+    # Save path
+    save_path = str(Path(__file__).parents[1] / config['trained_model_path'])
+    for _ in range(5):
+        # Dataset
+        dataset = pooled_data_iterator(config)
+
+        # Train the model
+        trained_model, trained_model_info = train_torch_model(
+            ShallowERPNet, config, dataset)
+        save_trained_pytorch_model(trained_model, trained_model_info,
+                                   save_path)
+    print('5 fold cross-validation done!')

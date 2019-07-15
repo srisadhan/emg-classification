@@ -209,10 +209,14 @@ def get_emg_epoch(raw_emg, time, config):
         A data (dict) of all the subjects with different conditions
 
     """
+    # Parameters
+    epoch_length = config['epoch_length']
+    overlap = config['overlap']
 
     raw_cropped = raw_emg.copy().crop(tmin=time[0], tmax=time[1])
     events = mne.make_fixed_length_events(raw_cropped,
-                                          duration=config['epoch_length'])
+                                          duration=epoch_length,
+                                          overlap=epoch_length * overlap)
     epochs = mne.Epochs(raw_cropped,
                         events,
                         tmin=0,
