@@ -100,13 +100,17 @@ def clean_epoch_data(subjects, trials, config):
 
     for subject in subjects:
         # Initialise for each subject
-        x_temp = np.empty((0, config['n_electrodes'], epoch_length * sfreq))
-        y_temp = np.empty((0, config['n_class']))
+        x_temp = []
+        y_temp = []
         for trial in trials:
             # Concatenate the data corresponding to all trials types
             x_array, y_array = convert_to_array(subject, trial, config)
-            x_temp = np.concatenate((x_temp, x_array), axis=0)
-            y_temp = np.concatenate((y_temp, y_array), axis=0)
+            x_temp.append(x_array)
+            y_temp.append(y_array)
+
+        # Convert to array
+        x_temp = np.concatenate(x_temp, axis=0)
+        y_temp = np.concatenate(y_temp, axis=0)
 
         # Append to the big dataset
         features_dataset['subject_' + subject]['features'] = np.float32(x_temp)

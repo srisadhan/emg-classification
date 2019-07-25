@@ -63,7 +63,10 @@ with skip_run('skip', 'pooled_data_svm_cross_validated') as check, check():
 
 with skip_run('skip', 'pooled_data_torch') as check, check():
     dataset = pooled_data_iterator(config)
-    train_torch_model(ShallowERPNet, config, dataset)
+    model, model_info = train_torch_model(ShallowERPNet, config, dataset)
+    path = Path(__file__).parents[1] / config['trained_model_path']
+    save_path = str(path)
+    save_trained_pytorch_model(model, model_info, save_path, save_model=False)
 
-with skip_run('run', 'average_accuracy') as check, check():
+with skip_run('skip', 'average_accuracy') as check, check():
     plot_average_model_accuracy('experiment_0', config)
