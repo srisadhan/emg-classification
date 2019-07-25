@@ -1,7 +1,5 @@
-import matplotlib.pyplot as plt
-import numpy as np
-import seaborn as sb
 import yaml
+from pathlib import Path
 
 from data.clean_data import clean_epoch_data
 from data.create_data import create_emg_data, create_emg_epoch
@@ -16,7 +14,7 @@ from models.torch_networks import ShallowERPNet
 
 from visualization.visualise import plot_average_model_accuracy
 
-from utils import *
+from utils import (skip_run, save_data, save_trained_pytorch_model)
 
 # The configuration file
 config = yaml.load(open('config.yml'), Loader=yaml.SafeLoader)

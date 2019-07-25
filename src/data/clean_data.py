@@ -2,10 +2,7 @@ import collections
 from pathlib import Path
 
 import deepdish as dd
-import mne
 import numpy as np
-import pandas as pd
-import yaml
 
 
 def one_hot_encode(label_length, category):
@@ -69,7 +66,7 @@ def convert_to_array(subject, trial, config):
     # In order to accomodate testing
     try:
         y_array = one_hot_encode(x_array.shape[0], category)
-    except:
+    except ImportError:
         y_array = np.zeros((x_array.shape[0], 3))
 
     return x_array, y_array
@@ -93,10 +90,6 @@ def clean_epoch_data(subjects, trials, config):
     """
     # Initialize the numpy array to store all subject's data
     features_dataset = collections.defaultdict(dict)
-
-    # Parameters
-    epoch_length = config['epoch_length']
-    sfreq = config['sfreq']
 
     for subject in subjects:
         # Initialise for each subject

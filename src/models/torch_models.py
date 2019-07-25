@@ -1,16 +1,13 @@
-import yaml
-from pathlib import Path
-
 import numpy as np
 import torch
 import torch.nn as nn
-from visdom import Visdom, server
 
-from .utils import visual_log, classification_accuracy, create_model_info
+from .utils import (visual_log, classification_accuracy, create_model_info,
+                    weights_init)
 
 
 def train_torch_model(network, config, data_iterator, new_weights=False):
-    """Main function to run the optimization..
+    """Main function to run the optimization.
 
     Parameters
     ----------

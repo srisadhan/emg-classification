@@ -1,11 +1,9 @@
-from pathlib import Path
-
-import deepdish as dd
-import mne
 import numpy as np
+
 from pyriemann.embedding import Embedding
 from pyriemann.estimation import XdawnCovariances
 from pyriemann.tangentspace import TangentSpace
+
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import cross_val_score
 from sklearn.pipeline import Pipeline
@@ -101,7 +99,8 @@ def svm_tangent_space_cross_validate(data):
 
 
 def xdawn_embedding(data):
-    """Perform embedding of EEG data in 2D Euclidean space with Laplacian Eigenmaps.
+    """Perform embedding of EEG data in 2D Euclidean space
+    with Laplacian Eigenmaps.
 
     Parameters
     ----------

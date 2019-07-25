@@ -1,11 +1,7 @@
-import yaml
 import torch
-import deepdish as dd
-from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sb
-import pickle
+
 from .utils import get_model_path, figure_asthetics
 
 
@@ -81,6 +77,7 @@ def plot_model_accuracy(experiment, config, model_number):
     validation_accuracy = model_info['validation_accuracy']
     testing_accuracy = model_info['testing_accuracy']
     epochs = np.arange(training_accuracy.shape[0])
+
     # Plotting
     fig, ax = plt.subplots()
     ax.plot(epochs, training_accuracy, color=[0.69, 0.18, 0.45, 1.00])
@@ -92,58 +89,6 @@ def plot_model_accuracy(experiment, config, model_number):
     plt.ylabel('Accuracy')
     plt.tight_layout()
     figure_asthetics(ax)
-    plt.show()
-
-    return None
-
-
-def plot_predictions(subject, trial, config, predictions, ins_index):
-    """A function to plot trajectory and predictions.
-
-    Parameters
-    ----------
-    subject : string
-        subject ID e.g. 7707.
-    trial : string
-        trial e.g. HighFine, AdaptFine.
-    predictions : numpy array
-        A numpy array of (m x 1) of predictions at required points.
-
-    """
-    # Co-ordinates
-    path = str(Path(__file__).parents[2] / config['raw_robot_dataset'])
-    all_data = dd.io.load(path)
-    temp_data = all_data[subject]['robot'][trial]
-    # Select only middle point of the epoch
-    sub_data = temp_data.get_data()[:, :, 128]
-    x, y = sub_data[:, 1], sub_data[:, 0]
-    if len(x) != len(
-            predictions):  # check is number of predictions matach x or y data
-        print(len(x), len(predictions))
-        raise Exception('Two epochs are not of same length!')
-    # Find three classes
-    idx_up = np.where(predictions == 0)
-    idx_down = np.where(predictions == 1)
-    idx_O = np.where(predictions == 2)
-
-    fig, ax = plt.subplots()
-    if ins_index is None:
-        # Plotting the prediction
-        ax.scatter(x[idx_up], y[idx_up], marker='^')
-        ax.scatter(x[idx_O], y[idx_O], marker='o')
-        ax.scatter(x[idx_down], y[idx_down], marker='v')
-    else:
-        ax.scatter(x[idx_up], y[idx_up], marker='^', s=ins_index[idx_up] * 100)
-        ax.scatter(x[idx_O], y[idx_O], marker='o', s=ins_index[idx_O] * 100)
-        ax.scatter(x[idx_down],
-                   y[idx_down],
-                   marker='v',
-                   s=ins_index[idx_down] * 100)
-    # Plotting the curve
-    plot_robot_position(subject, trial, config)
-    ax.legend(['Increase', 'Hold', 'Decrease'])
-    ax.xlabel('x')
-    ax.ylabel('y')
     plt.show()
 
     return None

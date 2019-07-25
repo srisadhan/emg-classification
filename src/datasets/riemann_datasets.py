@@ -1,11 +1,9 @@
 from pathlib import Path
 
 import deepdish as dd
-import mne
 import numpy as np
 from imblearn.under_sampling import RandomUnderSampler
-from pyriemann.estimation import XdawnCovariances
-from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.model_selection import train_test_split
 
 
 def train_test_data(features, labels, leave_tags, config):
@@ -34,8 +32,8 @@ def train_test_data(features, labels, leave_tags, config):
     # Train test split
     id = np.arange(features.shape[0])
     if (leave_tags == 0).any():
-        train_id = np.nonzero(tags)[0]
-        test_id = np.nonzero(1 - tags)[0]
+        train_id = np.nonzero(leave_tags)[0]
+        test_id = np.nonzero(1 - leave_tags)[0]
     else:
         train_id, test_id, _, _ = train_test_split(id,
                                                    id * 0,
@@ -74,8 +72,6 @@ def subject_pooled_data(config):
 
     # Parameters
     subjects = config['subjects']
-    epoch_length = config['epoch_length']
-    sfreq = config['sfreq']
 
     # Subject information
     subjects = config['subjects']
@@ -98,7 +94,6 @@ def subject_pooled_data(config):
 
     # Balance the dataset
     rus = RandomUnderSampler()
-    id = np.expand_dims(np.arange(x.shape[0]), axis=1)
     rus.fit_resample(y, y)
 
     # Store them in dictionary
@@ -150,7 +145,6 @@ def subject_dependent_data(config):
 
     # Balance the dataset
     rus = RandomUnderSampler()
-    id = np.expand_dims(np.arange(x.shape[0]), axis=1)
     rus.fit_resample(y, y)
 
     # Store them in dictionary
@@ -186,7 +180,6 @@ def subject_specific_data(subject, config):
 
     # Balance the dataset
     rus = RandomUnderSampler()
-    id = np.expand_dims(np.arange(x.shape[0]), axis=1)
     rus.fit_resample(y, y)
 
     # Store them in dictionary

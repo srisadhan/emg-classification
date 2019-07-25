@@ -26,8 +26,8 @@ class SubjectSpecificDataset(Dataset):
     """
     def __init__(self, x_data):
         super(SubjectSpecificDataset, self).__init__()
-        self.length = features.shape[0]
-        self.features = features
+        self.length = x_data.shape[0]
+        self.features = x_data
 
     def __getitem__(self, index):
         # Convert to torch tensors
@@ -88,8 +88,6 @@ def subject_pooled_data(config):
 
     # Parameters
     subjects = config['subjects']
-    epoch_length = config['epoch_length']
-    sfreq = config['sfreq']
 
     # Subject information
     subjects = config['subjects']
@@ -112,7 +110,6 @@ def subject_pooled_data(config):
 
     # Balance the dataset
     rus = RandomUnderSampler()
-    id = np.expand_dims(np.arange(x.shape[0]), axis=1)
     rus.fit_resample(y, y)
 
     # Store them in dictionary
@@ -124,7 +121,8 @@ def subject_pooled_data(config):
 
 
 def data_split_ids(labels, test_size=0.15):
-    """Generators training, validation, and training indices to be used by Dataloader.
+    """Generators training, validation, and training
+    indices to be used by Dataloader.
 
     Parameters
     ----------

@@ -4,8 +4,7 @@ from pathlib import Path
 
 import mne
 import numpy as np
-import pandas as pd
-import yaml
+
 import deepdish as dd
 
 
@@ -89,7 +88,6 @@ def get_trail_time(subject, trial, config):
     emg_time = [
         datetime.fromtimestamp(float(item) / 1e6) for item in time_data
     ]
-    time = np.array(emg_time)  # convert to numpy
     dt = np.diff(emg_time).mean()  # average sampling rate
     sfreq = 1 / dt.total_seconds()
 
