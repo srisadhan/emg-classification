@@ -70,9 +70,6 @@ def subject_pooled_data(config):
     path = str(Path(__file__).parents[2] / config['clean_emg_data'])
     data = dd.io.load(path)
 
-    # Parameters
-    subjects = config['subjects']
-
     # Subject information
     subjects = config['subjects']
 

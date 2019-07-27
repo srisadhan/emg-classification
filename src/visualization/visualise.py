@@ -1,8 +1,9 @@
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 
-from .utils import get_model_path, figure_asthetics
+from .utils import (get_model_path, figure_asthetics, annotate_significance)
 
 
 def plot_average_model_accuracy(experiment, config, variation=False):
@@ -90,5 +91,58 @@ def plot_model_accuracy(experiment, config, model_number):
     plt.tight_layout()
     figure_asthetics(ax)
     plt.show()
+
+    return None
+
+
+def plot_bar(config, dataframe, independent, dependent):
+    """Bar plot of the dataframe.
+
+    Parameters
+    ----------
+    config : yaml
+        The configuration file.
+    dataframe : dataframe
+        A pandas dataframe containing the dependent and independent data
+        with group data (usually this is the subject).
+    dependent : str
+        A string stating which variable to use as dependent variable
+    independent : str
+        A string stating which variable to use as independent variable
+
+    Returns
+    -------
+    None
+
+    """
+
+    # sns.set(font_scale=1.4)
+
+    ax = sns.barplot(x=dependent,
+                     y=independent,
+                     hue='damping',
+                     data=dataframe,
+                     capsize=.1)
+
+    # Add significance
+    if independent == 'velocity':
+        y = 0.14
+        annotate_significance(0.8, 1.20, y, 0.005)
+        ax.set_ylim([0, y + y * 0.1])
+
+    else:
+        # Within Fine motion
+        y = 5
+        annotate_significance(-0.2, 0.2, y, 0.005)
+        ax.set_ylim([0, y + y * 0.1])
+
+        # Within Gross motion
+        y = 16
+        annotate_significance(0.8, 1.20, y, 0.005)
+        ax.set_ylim([0, y + y * 0.1])
+
+    # Other figure information
+    ax.set_ylabel(independent.replace('_', ' '))
+    ax.set_xlabel('task type information')
 
     return None
