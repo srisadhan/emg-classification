@@ -2,10 +2,7 @@ import collections
 from pathlib import Path
 
 import deepdish as dd
-import mne
 import numpy as np
-import pandas as pd
-import yaml
 
 
 def one_hot_encode(label_length, category):
@@ -69,7 +66,7 @@ def convert_to_array(subject, trial, config):
     # In order to accomodate testing
     try:
         y_array = one_hot_encode(x_array.shape[0], category)
-    except:
+    except ImportError:
         y_array = np.zeros((x_array.shape[0], 3))
 
     return x_array, y_array
@@ -94,19 +91,19 @@ def clean_epoch_data(subjects, trials, config):
     # Initialize the numpy array to store all subject's data
     features_dataset = collections.defaultdict(dict)
 
-    # Parameters
-    epoch_length = config['epoch_length']
-    sfreq = config['sfreq']
-
     for subject in subjects:
         # Initialise for each subject
-        x_temp = np.empty((0, config['n_electrodes'], epoch_length * sfreq))
-        y_temp = np.empty((0, config['n_class']))
+        x_temp = []
+        y_temp = []
         for trial in trials:
             # Concatenate the data corresponding to all trials types
             x_array, y_array = convert_to_array(subject, trial, config)
-            x_temp = np.concatenate((x_temp, x_array), axis=0)
-            y_temp = np.concatenate((y_temp, y_array), axis=0)
+            x_temp.append(x_array)
+            y_temp.append(y_array)
+
+        # Convert to array
+        x_temp = np.concatenate(x_temp, axis=0)
+        y_temp = np.concatenate(y_temp, axis=0)
 
         # Append to the big dataset
         features_dataset['subject_' + subject]['features'] = np.float32(x_temp)

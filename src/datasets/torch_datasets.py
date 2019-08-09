@@ -24,11 +24,10 @@ class SubjectSpecificDataset(Dataset):
         Length of the dataset.
 
     """
-
     def __init__(self, x_data):
         super(SubjectSpecificDataset, self).__init__()
-        self.length = features.shape[0]
-        self.features = features
+        self.length = x_data.shape[0]
+        self.features = x_data
 
     def __getitem__(self, index):
         # Convert to torch tensors
@@ -52,7 +51,6 @@ class PooledDataset(Dataset):
     ids_list
 
     """
-
     def __init__(self, features, labels, ids_list):
         super(PooledDataset, self).__init__()
         self.ids_list = ids_list
@@ -89,28 +87,32 @@ def subject_pooled_data(config):
     data = dd.io.load(path)
 
     # Parameters
-    epoch_length = config['epoch_length']
     subjects = config['subjects']
-    sfreq = config['sfreq']
 
-    # Empty arrays for data
-    x = np.empty((0, config['n_electrodes'], epoch_length * sfreq))
-    y = np.empty((0, config['n_class']))
+    # Subject information
+    subjects = config['subjects']
+
+    # Empty array (list)
+    x = []
+    y = []
     tags = np.empty((0, 1))
 
     for subject in subjects:
         x_temp = data['subject_' + subject]['features']
         y_temp = data['subject_' + subject]['labels']
-        x = np.concatenate((x, x_temp), axis=0)
-        y = np.concatenate((y, y_temp), axis=0)
+        x.append(x_temp)
+        y.append(y_temp)
         tags = np.concatenate((tags, y_temp[:, 0:1] * 0 + 1), axis=0)
+
+    # Convert to array
+    x = np.concatenate(x, axis=0)
+    y = np.concatenate(y, axis=0)
 
     # Balance the dataset
     rus = RandomUnderSampler()
-    id = np.expand_dims(np.arange(x.shape[0]), axis=1)
     rus.fit_resample(y, y)
 
-    # Form the features, labels
+    # Store them in dictionary
     features = x[rus.sample_indices_, :, :]
     labels = y[rus.sample_indices_, :]
     tags = tags[rus.sample_indices_, :]
@@ -119,7 +121,8 @@ def subject_pooled_data(config):
 
 
 def data_split_ids(labels, test_size=0.15):
-    """Generators training, validation, and training indices to be used by Dataloader.
+    """Generators training, validation, and training
+    indices to be used by Dataloader.
 
     Parameters
     ----------
