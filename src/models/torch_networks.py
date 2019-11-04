@@ -1,7 +1,3 @@
-import yaml
-import numpy as np
-from pathlib import Path
-
 import torch
 import torch.nn as nn
 
@@ -24,7 +20,6 @@ class ShallowERPNet(nn.Module):
         Classification convolution layer.
 
     """
-
     def __init__(self, OUTPUT, config):
         super(ShallowERPNet, self).__init__()
         # Configuration of EMGsignals
@@ -46,7 +41,7 @@ class ShallowERPNet(nn.Module):
             nn.LogSoftmax(dim=1))
 
     def forward(self, x):
-        x = x.view(-1, 1, self.n_electrodes, self.epoch_length * self.s_freq)
+        x = x[:, None, :, :]  # Add the extra dimension
         out = self.net_1(x)
         out = out * out
         out = self.pool(out)

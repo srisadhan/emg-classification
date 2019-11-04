@@ -5,11 +5,11 @@ from pathlib import Path
 import mne
 import numpy as np
 import pandas as pd
-import yaml
+
 import deepdish as dd
+import sys
 
-
-def get_trial_path(subject, trial, config):
+def get_trial_path(subject, trial, config, robot=False):
     """Get the trail path for a given subject and trial.
 
     Parameters
@@ -20,6 +20,8 @@ def get_trial_path(subject, trial, config):
         A trail e.g. HighFine..
     config : yaml
         The configuration file.
+    robot : bool
+        To get robot path or emg path
 
     Returns
     -------
@@ -27,14 +29,24 @@ def get_trial_path(subject, trial, config):
         A str specifying the path to the data.
 
     """
+    if robot:
+        # Trial time
+        path = Path(__file__).parents[2] / config['force_data_path'] / subject
+        for file in path.iterdir():
+            file_name = file.name.split('_')
+            if file_name[1] == trial:
+                break
+        trial_path = file
 
-    # Trial time
-    path = Path(__file__).parents[2] / config['raw_emg_path'] / subject
-    for file in path.iterdir():
-        file_name = file.name.split('-')
-        if file_name[0] == 'emg':
-            break
-    trial_path = file
+    else:
+
+        # Trial time
+        path = Path(__file__).parents[2] / config['raw_emg_path'] / subject
+        for file in path.iterdir():
+            file_name = file.name.split('-')
+            if file_name[0] == 'emg':
+                break
+        trial_path = file
 
     return trial_path
 
@@ -59,9 +71,7 @@ def get_trail_time(subject, trial, config):
     """
 
     # Trial time
-    # Hard coding the path as the data is already there
-    temp = '/Users/Hemanth/Google Drive/RESEARCH/Human Robot Interaction Study/Human_robot_interaction_eeg/data/raw/experiment_0/force_data'
-    path = Path(temp) / subject
+    path = Path(__file__).parents[2] / config['force_data_path'] / subject
     for file in path.iterdir():
         file_name = file.name.split('_')
         if file_name[1] == trial:
@@ -89,7 +99,6 @@ def get_trail_time(subject, trial, config):
     emg_time = [
         datetime.fromtimestamp(float(item) / 1e6) for item in time_data
     ]
-    time = np.array(emg_time)  # convert to numpy
     dt = np.diff(emg_time).mean()  # average sampling rate
     sfreq = 1 / dt.total_seconds()
 
@@ -158,6 +167,58 @@ def get_raw_emg(subject, trial, config):
     raw.info['experimenter'] = 'hemanth'
 
     return raw, [trial_start, trial_end]
+
+
+def get_robot_data(subject, trial, config):
+    """Get the force and velocity data of a subject and a trial.
+
+    Parameters
+    ----------
+    subject : str
+        A string of subject ID e.g. 7707.
+    trial : str
+        A trail e.g. HighFine..
+    config : yaml
+        The configuration file.
+    Returns
+    ----------
+    robot_data : array
+        A numpy array containing  total_force, velocity
+
+    """
+    trial_path = get_trial_path(subject, trial, config, robot=True)
+    data = np.genfromtxt(trial_path,
+                         dtype=float,
+                         delimiter=',',
+                         usecols=[13, 14, 19, 20],
+                         skip_footer=1250,
+                         skip_header=1250)
+    time_data = np.genfromtxt(trial_path,
+                              dtype=str,
+                              delimiter=',',
+                              usecols=0,
+                              skip_footer=1250,
+                              skip_header=1250).tolist()
+    # Total force
+    total_force = np.linalg.norm(data[1:, 0:2], axis=1)
+
+    # Average time
+    time = [datetime.strptime(item, '%H:%M:%S:%f') for item in time_data]
+    time = np.array(time)  # convert to numpy
+
+    # Convert to seconds
+    helper = np.vectorize(lambda x: x.total_seconds())
+    dt = helper(np.diff(time))  # average time difference
+
+    # x and y co-ordinates of the end effector
+    dx = np.diff(data[:, 2])
+    dy = np.diff(data[:, 3])
+    velocity = np.sqrt(np.square(dx) + np.square(dy)) / dt
+
+    # Stack all the vectors
+    robot_data = np.vstack((total_force, velocity)).T
+
+    return robot_data
 
 
 def create_emg_data(subjects, trials, config):
@@ -263,3 +324,84 @@ def create_emg_epoch(subjects, trials, config):
         emg_epochs['subject_' + subject] = temp
 
     return emg_epochs
+
+
+def create_robot_dataframe(config):
+    """Get subject independent data (pooled data).
+
+    Parameters
+    ----------
+    config : yaml
+        The configuration file
+
+    Returns
+    -------
+    features, labels, tags
+        2 arrays features and labels.
+        A tag determines whether the data point is used in training.
+
+    """
+
+    columns = ['total_force', 'velocity', 'task', 'damping', 'subject']
+    dataframe = pd.DataFrame(columns=columns)
+
+    for subject in config['subjects']:
+        for trial in config['trials']:
+            temp = np.mean(get_robot_data(subject, trial, config), axis=0)
+
+            # Form a dataframe and sample the array simultaneously
+            temp_df = pd.DataFrame(data=np.expand_dims(temp, axis=0),
+                                   columns=['total_force', 'velocity'])
+
+            # Add other information
+            temp_df['subject'] = subject
+            if trial.find('Gross') > 0:
+                temp_df['task'] = 'Gross'
+            else:
+                temp_df['task'] = 'Fine'
+
+            if trial.find('High'):
+                temp_df['damping'] = 'Low'
+            else:
+                temp_df['damping'] = 'High'
+
+            # Append to the main dataframe
+            dataframe = pd.concat([dataframe, temp_df],
+                                  ignore_index=True,
+                                  sort=False)
+
+    return dataframe
+
+
+def sort_order_emg_channels(config):
+    """ Sort the emg channels of each subject based on the decreasing variance
+    Parameters
+    ----------
+    config : yaml
+        configuration file
+    sort   : bool
+        sort the channels if True
+
+    Return
+    ------
+
+    """
+    Data = collections.defaultdict(dict)
+
+    for subject in config['subjects']:
+        path = Path(__file__).parents[2] / config['raw_emg_path'] / subject
+        for file in path.iterdir():
+            file_name = file.name.split('-')
+            if file_name[0] == 'emg':
+                data    = np.genfromtxt(file,
+                                     dtype=float,
+                                     delimiter=',',
+                                     usecols=np.arange(1,9,1),
+                                     skip_footer=1250,
+                                     skip_header=1250)
+                emg_std  = np.std(data, axis=0)
+                emg_order= np.argsort(-emg_std) # decreasing order
+
+        Data['subject_'+ subject]['channel_order'] = emg_order
+
+    return Data

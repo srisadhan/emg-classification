@@ -1,6 +1,5 @@
-import numpy as np
-
 import torch
+import torch.nn as nn
 from torchnet.logger import VisdomPlotLogger
 from torch.nn.init import xavier_normal_
 

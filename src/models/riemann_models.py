@@ -1,13 +1,11 @@
-from pathlib import Path
-
-import deepdish as dd
-import mne
 import numpy as np
+
 from pyriemann.embedding import Embedding
 from pyriemann.estimation import XdawnCovariances
 from pyriemann.tangentspace import TangentSpace
+
 from sklearn.metrics import accuracy_score
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, KFold
 from sklearn.pipeline import Pipeline
 from sklearn.svm import SVC
 
@@ -86,22 +84,25 @@ def svm_tangent_space_cross_validate(data):
     x = np.concatenate((data['train_x'], data['test_x']), axis=0)
     y = np.concatenate((data['train_y'], data['test_y']), axis=0)
 
+    print('Shape of the feature data: ', x.shape)
     # Construct sklearn pipeline
     n_components = 3  # pick some components
     clf = Pipeline([('xdawn_transform',
                      XdawnCovariances(n_components, estimator='lwf')),
                     ('tangent_space', TangentSpace(metric='riemann')),
                     ('svm_classify', SVC(kernel='rbf', gamma='auto'))])
+
     # cross validation
-    scores = cross_val_score(clf, x, y, cv=5)
-    print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
+    scores = cross_val_score(clf, x, y, cv=KFold(5, shuffle=True))
+    print("Accuracy: %0.4f (+/- %0.4f)" % (scores.mean(), scores.std() * 2))
     print('\n')
 
     return scores
 
 
 def xdawn_embedding(data):
-    """Perform embedding of EEG data in 2D Euclidean space with Laplacian Eigenmaps.
+    """Perform embedding of EEG data in 2D Euclidean space
+    with Laplacian Eigenmaps.
 
     Parameters
     ----------
