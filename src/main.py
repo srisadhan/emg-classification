@@ -9,6 +9,7 @@ import copy
 import hdf5storage
 import h5py
 import numpy as np
+from pathlib import Path
 
 from pyriemann.estimation import Covariances, Shrinkage, Coherences
 from pyriemann.tangentspace import TangentSpace, FGDA
@@ -22,6 +23,7 @@ from data.create_data import (create_emg_data, create_emg_epoch,
 from data.create_data_sri import read_Pos_Force_data, epoch_raw_emg, pool_emg_data
 
 from datasets.riemann_datasets import subject_pooled_data, train_test_data, subject_dependent_data
+
 from datasets.torch_datasets import pooled_data_iterator
 from datasets.statistics_dataset import matlab_dataframe
 
@@ -42,12 +44,12 @@ from models.emg_features import (extract_emg_features, pool_subject_emg_features
                                 lda_cross_validated_pooled_emg_features)
 
 from visualization.visualise import (plot_average_model_accuracy, plot_bar)
-
 from utils import (skip_run, save_data, save_trained_pytorch_model)
 
 from sklearn.svm import SVC
 from imblearn.under_sampling import RandomUnderSampler
 from scipy import signal
+
 
 # The configuration file
 config = yaml.load(open('config.yml'), Loader=yaml.SafeLoader)
@@ -84,6 +86,22 @@ with skip_run('skip', 'statistical_analysis') as check, check():
     dataframe = matlab_dataframe(config)
 
     vars = ['task + damping', 'task * damping']
+
+    # # Perform for total force
+    # for var in vars:
+    #     md_task = mixed_effect_model(dataframe,
+    #                                  dependent='total_force',
+    #                                  independent=var)
+    # Perform for velocity
+    for var in vars:
+        print(var)
+        md_task = mixed_effect_model(dataframe,
+                                     dependent='velocity',
+                                     independent=var)
+
+with skip_run('skip', 'svm_pooled_data') as check, check():
+    # Load main data
+    features, labels, leave_tags = subject_pooled_data(config)
 
     # # Perform for total force
     # for var in vars:

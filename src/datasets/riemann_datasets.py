@@ -73,7 +73,7 @@ def subject_pooled_data(subjects, config):
     data = dd.io.load(path)
 
     # Subject information
-    # subjects = config['subjects']
+    subjects = config['subjects']
 
     # Empty array (list)
     x = []

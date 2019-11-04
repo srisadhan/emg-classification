@@ -8,6 +8,7 @@ sfreq:                200
 overlap:              0.75
 n_features:           4
 threshold:            1
+
 ##---------------------------------------------------------------------##
 # Neural network parameters
 OUTPUT:               3
@@ -20,7 +21,6 @@ DROP_OUT:             0.10
 ##---------------------------------------------------------------------##
 subject_count     : 12 # number of subjects
 features          : ['RMS', 'TD', 'HIST', 'mDWT']
-
 
 ##---------------------------------------------------------------------##
 # Experiment 0
@@ -47,4 +47,5 @@ ninapro_DB5_data   :  'data/processed/Ninapro/Features.mat'
 mat_file_loc      :   '../data/interim/Amir_data_' #50_features.mat'
 save_h5_file      :   '../data/processed/time_frequency_EMG_features.h5'
 pooled_riemannian_features:  'data/processed/pooled_riemannian_features.h5'
+
 ##---------------------------------------------------------------------##

@@ -5,7 +5,6 @@ from pathlib import Path
 import mne
 import numpy as np
 import pandas as pd
-
 import deepdish as dd
 import sys
 
@@ -405,3 +404,4 @@ def sort_order_emg_channels(config):
         Data['subject_'+ subject]['channel_order'] = emg_order
 
     return Data
+
