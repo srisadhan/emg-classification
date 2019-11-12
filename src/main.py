@@ -49,10 +49,13 @@ from utils import (skip_run, save_data, save_trained_pytorch_model)
 from sklearn.svm import SVC
 from imblearn.under_sampling import RandomUnderSampler
 from scipy import signal
-
+from sklearn.manifold import TSNE
+from umap import UMAP
+from mpl_toolkits.mplot3d import Axes3D
+from sklearn.metrics import confusion_matrix
 
 # The configuration file
-config = yaml.load(open('config.yml'), Loader=yaml.SafeLoader)
+config = yaml.load(open('src/config.yml'), Loader=yaml.SafeLoader)
 
 with skip_run('skip', 'create_emg_data') as check, check():
     data = create_emg_data(config['subjects'], config['trials'], config)
@@ -383,7 +386,7 @@ with skip_run('skip', 'epoch_raw_emg_data') as check, check():
     path = str(Path(__file__).parents[1] / config['raw_pooled_emg_data'])
     dd.io.save(path, Data)
 
-with skip_run('run', 'classify_task_riemann_features') as check, check():
+with skip_run('skip', 'classify_task_riemann_features') as check, check():
     # Subject information
     subjects = config['subjects']
 
@@ -394,7 +397,7 @@ with skip_run('run', 'classify_task_riemann_features') as check, check():
     y = Data['y']
 
     # pool the emg epochs into a 2d-array
-    # X, y = pool_emg_data(subjects, config['trials'], config)    
+    # X, y = pool_emg_data(subjects, config['trials'], config)
     # print(X.shape)
     # sys.exit()
     # cohest = Coherences(window=100, overlap=0.75, fmin=None, fmax=None, fs=None).fit_transform(X)
@@ -406,7 +409,7 @@ with skip_run('run', 'classify_task_riemann_features') as check, check():
 
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
-    
+
     # project the covariance into the tangent space
     ts = TangentSpace().fit_transform(covest)
 
@@ -436,5 +439,46 @@ with skip_run('run', 'classify_task_riemann_features') as check, check():
 
 
 ## ----------------------------------------------------------##
-##-- Projecting the force and velocity data onto manifolds --#
-# with skip_run('run', 'project_force_data_using_tSNE') as check, check():
+#-- Projecting the force and velocity data onto manifolds --#
+with skip_run('run', 'project_Riemannian_features_data_using_tSNE') as check, check():
+    # Subject information
+    subjects = config['subjects']
+
+    path = str(Path(__file__).parents[1] / config['raw_pooled_emg_data'])
+    Data = dd.io.load(path)
+
+    X = Data['X']
+    Y = Data['y']
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    print('t-SNE based data visualization')
+    ind = np.arange(0,Y.shape[0]).reshape(Y.shape[0],1)
+    temp1 = ind[Y == 1]
+    temp2 = ind[Y == 2]
+    temp3 = ind[Y == 3]
+
+    # X_embedded = TSNE(n_components=2, perplexity=100, learning_rate=50.0).fit_transform(ts)
+    #
+    # plt.figure()
+    # plt.plot(X_embedded[temp1,0],X_embedded[temp1,1],'bo')
+    # plt.plot(X_embedded[temp2,0],X_embedded[temp2,1],'ro')
+    # plt.plot(X_embedded[temp3,0],X_embedded[temp3,1],'ko')
+    # plt.show()
+    # sys.exit()
+
+    # for neighbor in [10, 30, 60 ]:
+    #     fit = UMAP(n_neighbors=neighbor, min_dist=0.0, n_components=3,metric='chebyshev')
+    #     X_embedded = fit.fit_transform(ts)
+    
+    #     fig = plt.figure()
+    #     ax = Axes3D(fig)
+    
+    #     ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],X_embedded[temp1,2],'bo')
+    #     ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],X_embedded[temp2,2],'ro')
+    #     ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'ko')
+    # plt.show()

@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 import mne
+from mne.datasets import sample
 import numpy as np
 import pandas as pd
 import deepdish as dd
@@ -274,6 +275,8 @@ def get_emg_epoch(raw_emg, time, config):
     overlap = config['overlap']
 
     raw_cropped = raw_emg.copy().crop(tmin=time[0], tmax=time[1])
+    raw_cropped = raw_cropped.copy().resample(config['sfreq'], npad='auto', verbose='error')
+
     events = mne.make_fixed_length_events(raw_cropped,
                                           duration=epoch_length,
                                           overlap=epoch_length * overlap)
