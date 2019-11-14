@@ -83,8 +83,8 @@ def get_trail_time(subject, trial, config):
                                dtype=str,
                                delimiter=',',
                                usecols=0,
-                               skip_footer=150,
-                               skip_header=100).tolist()
+                               skip_footer=2,
+                               skip_header=2).tolist()
 
     # Get EMG time
     trial_path = get_trial_path(subject, trial, config)
@@ -92,8 +92,8 @@ def get_trail_time(subject, trial, config):
                               dtype=str,
                               delimiter=',',
                               usecols=0,
-                              skip_footer=150,
-                              skip_header=100).tolist()
+                              skip_footer=2,
+                              skip_header=2).tolist()
 
     # Get the sampling frequency
     emg_time = [
@@ -147,8 +147,8 @@ def get_raw_emg(subject, trial, config):
                              delimiter=',',
                              unpack=True,
                              usecols=[1, 2, 3, 4, 5, 6, 7, 8],
-                             skip_footer=150,
-                             skip_header=100)
+                             skip_footer=2,
+                             skip_header=2)
 
     trial_start, trial_end, sfreq = get_trail_time(subject, trial, config)
 
@@ -167,6 +167,80 @@ def get_raw_emg(subject, trial, config):
     raw.info['experimenter'] = 'hemanth'
 
     return raw, [trial_start, trial_end]
+
+
+def get_raw_emg_exp2(subject, trial, config):
+    """Get the raw emg data for a subject and trail from experiment 2
+
+    Parameters
+    ----------
+    subject : str
+        A string of subject ID e.g. 7707.
+    trial : str
+        A trail e.g. HighFine.
+    config : yaml
+        The configuration file.
+
+    Returns
+    -------
+    mne object
+        A raw mne object.
+
+    """
+    
+    filepath = Path(__file__).parents[2] / 'data/raw/exp2/' / subject / trial
+
+    for file in filepath.iterdir():
+        if (file.name.split('.')[0] == 'EMG'):
+            # Get the time from EMG.csv
+            time = np.genfromtxt(file,
+                                dtype=None,
+                                delimiter=',',
+                                unpack=True,
+                                skip_header=2,
+                                skip_footer=2,
+                                usecols=0,
+                                encoding=None)
+            # Get the EMG data
+            emg_data = np.genfromtxt(file,
+                                dtype=float,
+                                delimiter=',',
+                                unpack=True,
+                                skip_header=2,
+                                skip_footer=2,
+                                usecols=np.arange(1,9),
+                                encoding=None)
+            
+            time_vec = np.zeros((len(time),1))
+            i = 0
+
+            # Convert the std time vector to float
+            for value in time:
+                temp = value.split(':')
+                time_vec[i,0]  = float(temp[0]) * 60 * 60 + float(temp[1]) * 60 + float(temp[2]) + float(temp[3]) / 1e6
+                i += 1
+
+            dt = np.diff(time_vec, axis=0).mean()  # average sampling rate
+            sfreq = 1 / dt
+
+            trial_start = time_vec[0,0]
+            trial_end   = time_vec[-1,0]
+            
+
+            # Create mne raw object
+            info = mne.create_info(ch_names=[
+                'emg_1', 'emg_2', 'emg_3', 'emg_4', 'emg_5', 'emg_6', 'emg_7', 'emg_8'
+            ],
+                                ch_types=['misc'] * emg_data.shape[0],
+                                sfreq=sfreq)
+
+            # Create mne raw file
+            raw = mne.io.RawArray(emg_data, info, verbose=False)
+
+            # Additional information
+            raw.info['subject_info'] = subject
+
+            return raw, [trial_start, trial_end]
 
 
 def get_robot_data(subject, trial, config):
@@ -244,7 +318,12 @@ def create_emg_data(subjects, trials, config):
     for subject in subjects:
         data = collections.defaultdict(dict)
         for trial in trials:
-            raw_data, trial_time = get_raw_emg(subject, trial, config)
+            if subject in config['subjects2']:
+                raw_data, trial_time = get_raw_emg_exp2(subject, trial, config)
+            else:
+                raw_data, trial_time = get_raw_emg(subject, trial, config)
+                
+
             data['emg'][trial] = raw_data
             data['time'][trial] = trial_time
         emg_data['subject_' + subject] = data
@@ -252,13 +331,15 @@ def create_emg_data(subjects, trials, config):
     return emg_data
 
 
-def get_emg_epoch(raw_emg, time, config):
+def get_emg_epoch(subject,raw_emg, time, config):
     """Create the epoch data from raw data.
 
     Parameter
     ----------
-    raw_emg : mne raw object
+    subject : string
         String of subject ID e.g. 7707
+    raw_emg : mne raw object
+        data structure of raw_emg
     time : list
         A list with start and end time
     config : yaml
@@ -274,8 +355,11 @@ def get_emg_epoch(raw_emg, time, config):
     epoch_length = config['epoch_length']
     overlap = config['overlap']
 
-    raw_cropped = raw_emg.copy().crop(tmin=time[0], tmax=time[1])
-    raw_cropped = raw_cropped.copy().resample(config['sfreq'], npad='auto', verbose='error')
+    if subject in config['subjects2']:
+        raw_cropped = raw_emg.copy().resample(config['sfreq2'], npad='auto', verbose='error')
+    else:
+        raw_cropped = raw_emg.copy().crop(tmin=time[0], tmax=time[1])
+        raw_cropped = raw_cropped.copy().resample(config['sfreq2'], npad='auto', verbose='error')
 
     events = mne.make_fixed_length_events(raw_cropped,
                                           duration=epoch_length,
@@ -322,7 +406,7 @@ def create_emg_epoch(subjects, trials, config):
             time = data['subject_' + subject]['time'][trial]
 
             # Create epoch data
-            temp['emg'][trial] = get_emg_epoch(raw_emg, time, config)
+            temp['emg'][trial] = get_emg_epoch(subject,raw_emg, time, config)
         emg_epochs['subject_' + subject] = temp
 
     return emg_epochs
@@ -399,8 +483,8 @@ def sort_order_emg_channels(config):
                                      dtype=float,
                                      delimiter=',',
                                      usecols=np.arange(1,9,1),
-                                     skip_footer=1250,
-                                     skip_header=1250)
+                                     skip_footer=config['skip_footer'],
+                                     skip_header=config['skip_header'])
                 emg_std  = np.std(data, axis=0)
                 emg_order= np.argsort(-emg_std) # decreasing order
 

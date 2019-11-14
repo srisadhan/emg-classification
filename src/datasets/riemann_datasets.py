@@ -51,7 +51,7 @@ def train_test_data(features, labels, leave_tags, config):
     return data
 
 
-def subject_pooled_data(subjects, config):
+def subject_pooled_EMG_data(subjects, config):
     """Get subject independent data (pooled data).
 
     Parameters

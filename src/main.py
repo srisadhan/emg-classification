@@ -22,7 +22,7 @@ from data.create_data import (create_emg_data, create_emg_epoch,
                               sort_order_emg_channels)
 from data.create_data_sri import read_Pos_Force_data, epoch_raw_emg, pool_emg_data
 
-from datasets.riemann_datasets import subject_pooled_data, train_test_data, subject_dependent_data
+from datasets.riemann_datasets import subject_pooled_EMG_data, train_test_data, subject_dependent_data
 
 from datasets.torch_datasets import pooled_data_iterator
 from datasets.statistics_dataset import matlab_dataframe
@@ -57,21 +57,21 @@ from sklearn.metrics import confusion_matrix
 # The configuration file
 config = yaml.load(open('src/config.yml'), Loader=yaml.SafeLoader)
 
-with skip_run('skip', 'create_emg_data') as check, check():
+with skip_run('run', 'create_emg_data') as check, check():
     data = create_emg_data(config['subjects'], config['trials'], config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['raw_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'create_epoch_data') as check, check():
+with skip_run('run', 'create_epoch_data') as check, check():
     data = create_emg_epoch(config['subjects'], config['trials'], config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['epoch_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'clean_epoch_data') as check, check():
+with skip_run('run', 'clean_epoch_data') as check, check():
     data = clean_epoch_data(config['subjects'], config['trials'], config)
 
     # Save the dataset
@@ -104,7 +104,7 @@ with skip_run('skip', 'statistical_analysis') as check, check():
 
 with skip_run('skip', 'svm_pooled_data') as check, check():
     # Load main data
-    features, labels, leave_tags = subject_pooled_data(config)
+    features, labels, leave_tags = subject_pooled_EMG_data(config)
 
     # # Perform for total force
     # for var in vars:
@@ -120,7 +120,7 @@ with skip_run('skip', 'svm_pooled_data') as check, check():
 
 with skip_run('skip', 'svm_pooled_riemannian_features') as check, check():
     # Load main data
-    features, labels, leave_tags = subject_pooled_data(config['subjects'], config)
+    features, labels, leave_tags = subject_pooled_EMG_data(config['subjects'], config)
     # Get the data
     data = train_test_data(features, labels, leave_tags, config)
 
@@ -130,7 +130,7 @@ with skip_run('skip', 'svm_pooled_riemannian_features') as check, check():
 
 with skip_run('skip', 'svm_cross_validated_pooled_data') as check, check():
     # Load main data
-    features, labels, leave_tags = subject_pooled_data(config['subjects'], config)
+    features, labels, leave_tags = subject_pooled_EMG_data(config['subjects'], config)
 
     # Get the data
     data = train_test_data(features, labels, leave_tags, config)
@@ -307,7 +307,7 @@ with skip_run('skip', 'classify_using_riemannian_features') as check, check():
     subjects = config['subjects']
 
     # Load main data
-    features, labels, _ = subject_pooled_data(subjects, config)
+    features, labels, _ = subject_pooled_EMG_data(subjects, config)
 
     X   = features
     y   = np.dot(labels,np.array([1,2,3]))
@@ -317,9 +317,6 @@ with skip_run('skip', 'classify_using_riemannian_features') as check, check():
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
 
-    # shrink the covariance matrix if necessary
-    # covest = Shrinkage().fit_transform(covest)
-
     # project the covariance into the tangent space
     ts = TangentSpace().fit_transform(covest)
 
@@ -327,11 +324,6 @@ with skip_run('skip', 'classify_using_riemannian_features') as check, check():
     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
     # Random forest classifier
     clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
-
-    # clf = make_pipeline(covest,ts,svc)
-
-    # cross validation
-    # accuracy = cross_val_score(clf, X, y, cv=KFold(5,shuffle=True))
 
     accuracy = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
     print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
@@ -344,9 +336,12 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     subjects = copy.copy(config['subjects'])
     random.shuffle(subjects)
 
+    # Number of subjects to train the classifier
+    N = 8
+
     # Load main data
-    train_x, train_y, _ = subject_pooled_data(subjects[0:8], config)
-    test_x, test_y, _   = subject_pooled_data(subjects[8:], config)
+    train_x, train_y, _ = subject_pooled_EMG_data(subjects[0:N], config)
+    test_x, test_y, _   = subject_pooled_EMG_data(subjects[N:], config)
 
     train_y = np.dot(train_y,np.array([1,2,3]))
     test_y  = np.dot(test_y,np.array([1,2,3]))
@@ -371,7 +366,97 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
     print("Inter-subject tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
+
 ## ----------------------------------------------------------##
+#-- Projecting the EMG data onto manifolds --#
+with skip_run('skip', 'project_EMG_Riemannian_features_data') as check, check():
+    # Subject information
+    subjects = config['subjects']
+
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, config)
+
+    X   = features
+    y   = np.dot(labels,np.array([1,2,3]))
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    print('t-SNE based data visualization')
+    temp1 = y == 1
+    temp2 = y == 2
+    temp3 = y == 3
+
+    # TSNE based projection
+    # X_embedded = TSNE(n_components=2, perplexity=100, learning_rate=50.0).fit_transform(ts)
+
+    # plt.figure()
+    # plt.plot(X_embedded[temp1,0],X_embedded[temp1,1],'bo')
+    # plt.plot(X_embedded[temp2,0],X_embedded[temp2,1],'ro')
+    # plt.plot(X_embedded[temp3,0],X_embedded[temp3,1],'ko')
+    # plt.show()
+
+    # UMAP based projection
+    for neighbor in [10, 30, 60 ]:
+        fit = UMAP(n_neighbors=neighbor, min_dist=0.0, n_components=3,metric='chebyshev')
+        X_embedded = fit.fit_transform(ts)
+    
+        fig = plt.figure()
+        ax = Axes3D(fig)
+    
+        ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],X_embedded[temp1,2],'bo')
+        ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],X_embedded[temp2,2],'ro')
+        ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'ko')
+    plt.show()
+
+#-- Projecting the force and velocity data onto manifolds --#
+with skip_run('skip', 'project_Force_data') as check, check():
+    # Subject information
+    subjects = config['subjects']
+
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, config)
+
+    X   = features
+    y   = np.dot(labels,np.array([1,2,3]))
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    print('t-SNE based data visualization')
+    temp1 = y == 1
+    temp2 = y == 2
+    temp3 = y == 3
+
+    # TSNE based projection
+    # X_embedded = TSNE(n_components=2, perplexity=100, learning_rate=50.0).fit_transform(ts)
+
+    # plt.figure()
+    # plt.plot(X_embedded[temp1,0],X_embedded[temp1,1],'bo')
+    # plt.plot(X_embedded[temp2,0],X_embedded[temp2,1],'ro')
+    # plt.plot(X_embedded[temp3,0],X_embedded[temp3,1],'ko')
+    # plt.show()
+
+    # UMAP based projection
+    for neighbor in [10, 30, 60 ]:
+        fit = UMAP(n_neighbors=neighbor, min_dist=0.0, n_components=3,metric='chebyshev')
+        X_embedded = fit.fit_transform(ts)
+    
+        fig = plt.figure()
+        ax = Axes3D(fig)
+    
+        ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],X_embedded[temp1,2],'bo')
+        ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],X_embedded[temp2,2],'ro')
+        ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'ko')
+    plt.show()
+
+## ----------alternative code for reading csv files----------##
 ##-- Task type classification using Riemannian features --#
 with skip_run('skip', 'epoch_raw_emg_data') as check, check():
     # Subject information
@@ -436,49 +521,3 @@ with skip_run('skip', 'classify_task_riemann_features') as check, check():
 
     accuracy = cross_val_score(clf2, ts, y.ravel(), cv=KFold(5,shuffle=True))
     print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
-
-
-## ----------------------------------------------------------##
-#-- Projecting the force and velocity data onto manifolds --#
-with skip_run('run', 'project_Riemannian_features_data_using_tSNE') as check, check():
-    # Subject information
-    subjects = config['subjects']
-
-    path = str(Path(__file__).parents[1] / config['raw_pooled_emg_data'])
-    Data = dd.io.load(path)
-
-    X = Data['X']
-    Y = Data['y']
-
-    # estimation of the covariance matrix
-    covest = Covariances().fit_transform(X)
-
-    # project the covariance into the tangent space
-    ts = TangentSpace().fit_transform(covest)
-
-    print('t-SNE based data visualization')
-    ind = np.arange(0,Y.shape[0]).reshape(Y.shape[0],1)
-    temp1 = ind[Y == 1]
-    temp2 = ind[Y == 2]
-    temp3 = ind[Y == 3]
-
-    # X_embedded = TSNE(n_components=2, perplexity=100, learning_rate=50.0).fit_transform(ts)
-    #
-    # plt.figure()
-    # plt.plot(X_embedded[temp1,0],X_embedded[temp1,1],'bo')
-    # plt.plot(X_embedded[temp2,0],X_embedded[temp2,1],'ro')
-    # plt.plot(X_embedded[temp3,0],X_embedded[temp3,1],'ko')
-    # plt.show()
-    # sys.exit()
-
-    # for neighbor in [10, 30, 60 ]:
-    #     fit = UMAP(n_neighbors=neighbor, min_dist=0.0, n_components=3,metric='chebyshev')
-    #     X_embedded = fit.fit_transform(ts)
-    
-    #     fig = plt.figure()
-    #     ax = Axes3D(fig)
-    
-    #     ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],X_embedded[temp1,2],'bo')
-    #     ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],X_embedded[temp2,2],'ro')
-    #     ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'ko')
-    # plt.show()

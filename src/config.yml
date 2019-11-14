@@ -6,6 +6,7 @@ n_class:              3
 freq_bands:           [[4, 7], [8, 10], [11, 13], [14, 22], [23, 35], [35, 45]]
 Fs:                   200
 sfreq:                200
+sfreq2:               150 # sampling frequency of second set of experiment   
 overlap:              0.75
 n_features:           4
 threshold:            1
@@ -27,8 +28,11 @@ features          : ['RMS', 'TD', 'HIST', 'mDWT']
 # Experiment 0
 # All subjects are used for training and testing
 subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820','8821','8822', '8823', '8824']
+subjects2:            ['9001', '9002', '9003']
 test_subjects:        []
 trials:               ['HighFine', 'HighGross', 'LowFine', 'LowGross']
+skip_header:          1000
+skip_footer:          200
 
 # Path
 raw_emg_path:         'data/raw/emg_data/'

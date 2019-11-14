@@ -67,7 +67,7 @@ class PooledDataset(Dataset):
         return self.features.shape[0]
 
 
-def subject_pooled_data(config):
+def subject_pooled_EMG_data(config):
     """Get subject independent data (pooled data).
 
     Parameters
@@ -176,7 +176,7 @@ def pooled_data_iterator(config):
     TEST_SIZE = config['TEST_SIZE']
 
     # Get the features and labels
-    features, labels, tags = subject_pooled_data(config)
+    features, labels, tags = subject_pooled_EMG_data(config)
 
     # Get training, validation, and testing ids_list
     ids_list = data_split_ids(labels, test_size=TEST_SIZE)
