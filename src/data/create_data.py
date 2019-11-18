@@ -83,17 +83,17 @@ def get_trail_time(subject, trial, config):
                                dtype=str,
                                delimiter=',',
                                usecols=0,
-                               skip_footer=2,
-                               skip_header=2).tolist()
+                               skip_footer=config['skip_footer'],
+                                skip_header=config['skip_header']).tolist()
 
     # Get EMG time
     trial_path = get_trial_path(subject, trial, config)
     time_data = np.genfromtxt(trial_path,
-                              dtype=str,
-                              delimiter=',',
-                              usecols=0,
-                              skip_footer=2,
-                              skip_header=2).tolist()
+                            dtype=str,
+                            delimiter=',',
+                            usecols=0,
+                            skip_footer=config['skip_footer'],
+                            skip_header=config['skip_header']).tolist()
 
     # Get the sampling frequency
     emg_time = [
@@ -147,8 +147,8 @@ def get_raw_emg(subject, trial, config):
                              delimiter=',',
                              unpack=True,
                              usecols=[1, 2, 3, 4, 5, 6, 7, 8],
-                             skip_footer=2,
-                             skip_header=2)
+                             skip_footer=config['skip_footer'],
+                                skip_header=config['skip_header'])
 
     trial_start, trial_end, sfreq = get_trail_time(subject, trial, config)
 
@@ -188,7 +188,7 @@ def get_raw_emg_exp2(subject, trial, config):
 
     """
     
-    filepath = Path(__file__).parents[2] / 'data/raw/exp2/' / subject / trial
+    filepath = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial
 
     for file in filepath.iterdir():
         if (file.name.split('.')[0] == 'EMG'):
@@ -197,8 +197,8 @@ def get_raw_emg_exp2(subject, trial, config):
                                 dtype=None,
                                 delimiter=',',
                                 unpack=True,
-                                skip_header=2,
-                                skip_footer=2,
+                                skip_footer=config['skip_footer'],
+                                skip_header=config['skip_header'],
                                 usecols=0,
                                 encoding=None)
             # Get the EMG data
@@ -206,8 +206,8 @@ def get_raw_emg_exp2(subject, trial, config):
                                 dtype=float,
                                 delimiter=',',
                                 unpack=True,
-                                skip_header=2,
-                                skip_footer=2,
+                                skip_footer=config['skip_footer'],
+                                skip_header=config['skip_header'],
                                 usecols=np.arange(1,9),
                                 encoding=None)
             
@@ -241,58 +241,6 @@ def get_raw_emg_exp2(subject, trial, config):
             raw.info['subject_info'] = subject
 
             return raw, [trial_start, trial_end]
-
-
-def get_robot_data(subject, trial, config):
-    """Get the force and velocity data of a subject and a trial.
-
-    Parameters
-    ----------
-    subject : str
-        A string of subject ID e.g. 7707.
-    trial : str
-        A trail e.g. HighFine..
-    config : yaml
-        The configuration file.
-    Returns
-    ----------
-    robot_data : array
-        A numpy array containing  total_force, velocity
-
-    """
-    trial_path = get_trial_path(subject, trial, config, robot=True)
-    data = np.genfromtxt(trial_path,
-                         dtype=float,
-                         delimiter=',',
-                         usecols=[13, 14, 19, 20],
-                         skip_footer=1250,
-                         skip_header=1250)
-    time_data = np.genfromtxt(trial_path,
-                              dtype=str,
-                              delimiter=',',
-                              usecols=0,
-                              skip_footer=1250,
-                              skip_header=1250).tolist()
-    # Total force
-    total_force = np.linalg.norm(data[1:, 0:2], axis=1)
-
-    # Average time
-    time = [datetime.strptime(item, '%H:%M:%S:%f') for item in time_data]
-    time = np.array(time)  # convert to numpy
-
-    # Convert to seconds
-    helper = np.vectorize(lambda x: x.total_seconds())
-    dt = helper(np.diff(time))  # average time difference
-
-    # x and y co-ordinates of the end effector
-    dx = np.diff(data[:, 2])
-    dy = np.diff(data[:, 3])
-    velocity = np.sqrt(np.square(dx) + np.square(dy)) / dt
-
-    # Stack all the vectors
-    robot_data = np.vstack((total_force, velocity)).T
-
-    return robot_data
 
 
 def create_emg_data(subjects, trials, config):
@@ -491,4 +439,223 @@ def sort_order_emg_channels(config):
         Data['subject_'+ subject]['channel_order'] = emg_order
 
     return Data
+
+
+def get_robot_data(subject, trial, config):
+    """Get the force and velocity data of a subject and a trial.
+
+    Parameters
+    ----------
+    subject : str
+        A string of subject ID e.g. 7707.
+    trial : str
+        A trail e.g. HighFine..
+    config : yaml
+        The configuration file.
+    Returns
+    ----------
+    robot_data : array
+        A numpy array containing  total_force, velocity
+
+    """
+    trial_path = get_trial_path(subject, trial, config, robot=True)
+    data = np.genfromtxt(trial_path,
+                         dtype=float,
+                         delimiter=',',
+                         usecols=[13, 14, 19, 20],
+                         skip_footer=1250,
+                         skip_header=1250)
+    time_data = np.genfromtxt(trial_path,
+                              dtype=str,
+                              delimiter=',',
+                              usecols=0,
+                              skip_footer=1250,
+                              skip_header=1250).tolist()
+    # Total force
+    total_force = np.linalg.norm(data[1:, 0:2], axis=1)
+
+    # Average time
+    time = [datetime.strptime(item, '%H:%M:%S:%f') for item in time_data]
+    time = np.array(time)  # convert to numpy
+
+    # Convert to seconds
+    helper = np.vectorize(lambda x: x.total_seconds())
+    dt = helper(np.diff(time))  # average time difference
+
+    # x and y co-ordinates of the end effector
+    dx = np.diff(data[:, 2])
+    dy = np.diff(data[:, 3])
+    velocity = np.sqrt(np.square(dx) + np.square(dy)) / dt
+
+    # Stack all the vectors
+    robot_data = np.vstack((total_force, velocity)).T
+
+    return robot_data
+
+
+def get_robot_force_data(subject, trial, config):
+    """Get the force and velocity data of a subject and a trial.
+
+    Parameters
+    ----------
+    subject : str
+        A string of subject ID e.g. 7707.
+    trial : str
+        A trail e.g. HighFine..
+    config : yaml
+        The configuration file.
+    Returns
+    ----------
+    robot_data : array
+        A numpy array containing  total_force
+
+    """
+    # path of the files
+    if subject in config['subjects2']:
+        trial_path = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial
+    else:
+        trial_path = get_trial_path(subject, trial, config, robot=True)
+    # read the data
+    force_data = np.genfromtxt(trial_path,
+                                dtype=float,
+                                delimiter=',',
+                                unpack=True,
+                                usecols=[13, 14],
+                                skip_footer=config['skip_footer'],
+                                skip_header=config['skip_header'])
+    time_data = np.genfromtxt(trial_path,
+                                dtype=str,
+                                delimiter=',',
+                                usecols=0,
+                                skip_footer=config['skip_footer'],
+                                skip_header=config['skip_header']).tolist()
+
+    # difference in force
+    # force_data = np.diff(force_data, n=1, axis=1)
+    
+    # Average time
+    time = [datetime.strptime(item, '%H:%M:%S:%f') for item in time_data]
+    time = np.array(time)  # convert to numpy
+
+    time = np.array([(t-time[0]).total_seconds() for t in time])
+    
+    # sampling frequency
+    sfreq = 1 / np.mean(np.diff(time))
+
+    # creating an mne object
+    info = mne.create_info(ch_names=['Fx', 'Fy'], sfreq=sfreq, ch_types=['misc'] * 2)
+    raw = mne.io.RawArray(force_data, info, verbose=False)
+
+    return raw, time
+
+
+def create_force_data(subjects, trials, config):
+    """Create the force data with each subject data in a dictionary.
+
+    Parameter
+    ----------
+    subject : list
+        String of subject ID e.g. 7707
+    error_type : list
+        Types of trials i.e., e.g. HighFine.
+    config : yaml
+        The configuration file
+
+    Returns
+    ----------
+    dict
+        A data (dict) of all the subjects with different conditions
+
+    """
+    force_data = {}
+    # Loop over all subjects and error types
+    for subject in subjects:
+        data = collections.defaultdict(dict)
+        for trial in trials:
+            raw_data, time = get_robot_force_data(subject, trial, config)              
+
+            data['force'][trial] = raw_data
+            data['time'][trial] = time
+
+        force_data['subject_' + subject] = data
+
+    return force_data
+
+
+def get_force_epoch(subject,raw_force, time, config):
+    """Create the epoch data from raw data.
+
+    Parameter
+    ----------
+    subject : string
+        String of subject ID e.g. 7707
+    raw_emg : mne raw object
+        data structure of raw_emg
+    time : list
+        A list with start and end time
+    config : yaml
+        The configuration file
+
+    Returns
+    ----------
+    mne epoch data
+        A data (dict) of all the subjects with different conditions
+
+    """
+    # Parameters
+    epoch_length = config['epoch_length']
+    overlap = config['overlap']
+    
+    raw_cropped = raw_force.copy().resample(config['sfreq'], npad='auto', verbose='error')
+
+    events = mne.make_fixed_length_events(raw_cropped,
+                                          duration=epoch_length,
+                                          overlap=epoch_length * overlap)
+    epochs = mne.Epochs(raw_cropped,
+                        events,
+                        tmin=0,
+                        tmax=config['epoch_length'],
+                        verbose=False)
+    return epochs
+
+
+def create_force_epoch(subjects, trials, config):
+    """Create the data with each subject data in a dictionary.
+
+    Parameter
+    ----------
+    subject : list
+        String of subject ID e.g. 7707
+    error_type : list
+        Types of trials i.e., e.g. HighFine.
+    config : yaml
+        The configuration file
+
+    Returns
+    ----------
+    dict
+        A data (dict) of all the subjects with different conditions
+
+    """
+
+    # Empty dictionary
+    force_epochs = {}
+
+    # Load the data
+    read_path = Path(__file__).parents[2] / config['raw_force_data']
+    data = dd.io.load(str(read_path))
+
+    # Loop over all subjects and error types
+    for subject in subjects:
+        temp = collections.defaultdict(dict)
+        for trial in trials:
+            raw_force = data['subject_' + subject]['force'][trial]
+            time = data['subject_' + subject]['time'][trial]
+
+            # Create epoch data
+            temp['force'][trial] = get_force_epoch(subject,raw_force, time, config)
+        force_epochs['subject_' + subject] = temp
+
+    return force_epochs
+
 

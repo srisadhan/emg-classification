@@ -51,7 +51,7 @@ def train_test_data(features, labels, leave_tags, config):
     return data
 
 
-def subject_pooled_EMG_data(subjects, config):
+def subject_pooled_EMG_data(subjects, path, config):
     """Get subject independent data (pooled data).
 
     Parameters
@@ -60,7 +60,8 @@ def subject_pooled_EMG_data(subjects, config):
         List of strings containing subject identifiers
     config : yaml
         The configuration file
-
+    path : str
+        path to the file
     Returns
     -------
     features, labels, tags
@@ -69,7 +70,7 @@ def subject_pooled_EMG_data(subjects, config):
 
     """
 
-    path = str(Path(__file__).parents[2] / config['clean_emg_data'])
+    # path = str(Path(__file__).parents[2] / config['clean_emg_data'])
     data = dd.io.load(path)
 
     # Subject information

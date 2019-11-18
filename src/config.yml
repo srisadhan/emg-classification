@@ -6,7 +6,7 @@ n_class:              3
 freq_bands:           [[4, 7], [8, 10], [11, 13], [14, 22], [23, 35], [35, 45]]
 Fs:                   200
 sfreq:                200
-sfreq2:               150 # sampling frequency of second set of experiment   
+sfreq2:               150 # sampling frequency of EMG in the exp 2   
 overlap:              0.75
 n_features:           4
 threshold:            1
@@ -27,20 +27,24 @@ features          : ['RMS', 'TD', 'HIST', 'mDWT']
 ##---------------------------------------------------------------------##
 # Experiment 0
 # All subjects are used for training and testing
-subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820','8821','8822', '8823', '8824']
+subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820','8821','8822', '8823', '8824', '9001', '9002', '9003']
 subjects2:            ['9001', '9002', '9003']
 test_subjects:        []
 trials:               ['HighFine', 'HighGross', 'LowFine', 'LowGross']
-skip_header:          1000
+skip_header:          2000
 skip_footer:          200
 
 # Path
 raw_emg_path:         'data/raw/emg_data/'
+exp2_data_path:       'data/raw/exp2'
 force_data_path:      'data/raw/force_data/'
 raw_emg_data:         'data/interim/raw_emg_exp_0_dataset.h5'
+raw_force_data:       'data/interim/raw_force_exp_0_dataset.h5'
 raw_pooled_emg_data:  'data/interim/raw_pooled_emg_exp_0_dataset.h5'
 epoch_emg_data:       'data/processed/epoch_emg_exp_0_dataset.h5'
+epoch_force_data:     'data/processed/epoch_force_exp_0_dataset.h5'
 clean_emg_data:       'data/processed/clean_emg_exp_0_dataset.h5'
+clean_force_data:     'data/processed/clean_force_exp_0_dataset.h5'
 torch_dataset:        'data/processed/torch_exp_0_dataset.h5'
 statistics_dataframe: 'data/processed/statistics_exp_0_dataset.h5'
 matlab_dataframe:     'data/external/matlab_dataframe.csv'

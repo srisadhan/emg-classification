@@ -17,8 +17,8 @@ from pyriemann.tangentspace import TangentSpace, FGDA
 from pathlib import Path
 import collections
 from data.clean_data import clean_epoch_data
-from data.create_data import (create_emg_data, create_emg_epoch,
-                              create_robot_dataframe,
+from data.create_data import (create_emg_data, create_emg_epoch, create_force_data,
+                              create_force_epoch, create_robot_dataframe,
                               sort_order_emg_channels)
 from data.create_data_sri import read_Pos_Force_data, epoch_raw_emg, pool_emg_data
 
@@ -57,22 +57,22 @@ from sklearn.metrics import confusion_matrix
 # The configuration file
 config = yaml.load(open('src/config.yml'), Loader=yaml.SafeLoader)
 
-with skip_run('run', 'create_emg_data') as check, check():
+with skip_run('skip', 'create_emg_data') as check, check():
     data = create_emg_data(config['subjects'], config['trials'], config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['raw_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('run', 'create_epoch_data') as check, check():
+with skip_run('skip', 'create_epoch_data') as check, check():
     data = create_emg_epoch(config['subjects'], config['trials'], config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['epoch_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('run', 'clean_epoch_data') as check, check():
-    data = clean_epoch_data(config['subjects'], config['trials'], config)
+with skip_run('skip', 'clean_epoch_data') as check, check():
+    data = clean_epoch_data(config['subjects'], config['trials'], 'emg', config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['clean_emg_data']
@@ -103,8 +103,11 @@ with skip_run('skip', 'statistical_analysis') as check, check():
                                      independent=var)
 
 with skip_run('skip', 'svm_pooled_data') as check, check():
+    subjects = config['subjects']
+    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
+
     # Load main data
-    features, labels, leave_tags = subject_pooled_EMG_data(config)
+    features, labels, leave_tags = subject_pooled_EMG_data(subjects, path, config)
 
     # # Perform for total force
     # for var in vars:
@@ -119,8 +122,9 @@ with skip_run('skip', 'svm_pooled_data') as check, check():
                                      independent=var)
 
 with skip_run('skip', 'svm_pooled_riemannian_features') as check, check():
+    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
     # Load main data
-    features, labels, leave_tags = subject_pooled_EMG_data(config['subjects'], config)
+    features, labels, leave_tags = subject_pooled_EMG_data(config['subjects'], path, config)
     # Get the data
     data = train_test_data(features, labels, leave_tags, config)
 
@@ -129,8 +133,9 @@ with skip_run('skip', 'svm_pooled_riemannian_features') as check, check():
     svm_tangent_space_prediction(clf, data['test_x'], data['test_y'])
 
 with skip_run('skip', 'svm_cross_validated_pooled_data') as check, check():
+    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
     # Load main data
-    features, labels, leave_tags = subject_pooled_EMG_data(config['subjects'], config)
+    features, labels, leave_tags = subject_pooled_EMG_data(config['subjects'], path, config)
 
     # Get the data
     data = train_test_data(features, labels, leave_tags, config)
@@ -302,12 +307,12 @@ with skip_run('skip', 'balance_pooled_emg_features') as check, check():
 ## ----------------------------------------------------------##
 
 ##-- Classification using Riemannian features--##
-with skip_run('skip', 'classify_using_riemannian_features') as check, check():
+with skip_run('skip', 'classify_using_riemannian_emg_features') as check, check():
     # Subject information
     subjects = config['subjects']
-
+    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
     # Load main data
-    features, labels, _ = subject_pooled_EMG_data(subjects, config)
+    features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
     X   = features
     y   = np.dot(labels,np.array([1,2,3]))
@@ -339,9 +344,10 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     # Number of subjects to train the classifier
     N = 8
 
+    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
     # Load main data
-    train_x, train_y, _ = subject_pooled_EMG_data(subjects[0:N], config)
-    test_x, test_y, _   = subject_pooled_EMG_data(subjects[N:], config)
+    train_x, train_y, _ = subject_pooled_EMG_data(subjects[0:N], path, config)
+    test_x, test_y, _   = subject_pooled_EMG_data(subjects[N:], path, config)
 
     train_y = np.dot(train_y,np.array([1,2,3]))
     test_y  = np.dot(test_y,np.array([1,2,3]))
@@ -366,6 +372,55 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
     print("Inter-subject tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
+with skip_run('run', 'create_force_data') as check, check():
+    data = create_force_data(config['subjects'], config['trials'], config)
+    
+    # save the data
+    path = Path(__file__).parents[1] / config['raw_force_data']
+    dd.io.save(str(path), data)
+
+with skip_run('run', 'create_force_epoch') as check, check():
+    data = create_force_epoch(config['subjects'], config['trials'], config)
+    
+    # save the data
+    path = Path(__file__).parents[1] / config['epoch_force_data']
+    dd.io.save(str(path), data)
+
+with skip_run('run', 'clean epoch_data') as check, check():
+    data = clean_epoch_data(config['subjects'], config['trials'], 'force', config)
+
+    # Save the dataset
+    save_path = Path(__file__).parents[1] / config['clean_force_data']
+    save_data(str(save_path), data, save=True)
+
+with skip_run('run', 'classify_using_riemannian_force_features') as check, check():
+    # Subject information
+    subjects = config['subjects']
+    path = str(Path(__file__).parents[1] / config['clean_force_data'])
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
+
+    X   = features
+    y   = np.dot(labels,np.array([1,2,3]))
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    accuracy = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
 
 ## ----------------------------------------------------------##
 #-- Projecting the EMG data onto manifolds --#
@@ -373,8 +428,9 @@ with skip_run('skip', 'project_EMG_Riemannian_features_data') as check, check():
     # Subject information
     subjects = config['subjects']
 
+    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
     # Load main data
-    features, labels, _ = subject_pooled_EMG_data(subjects, config)
+    features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
     X   = features
     y   = np.dot(labels,np.array([1,2,3]))
@@ -417,8 +473,9 @@ with skip_run('skip', 'project_Force_data') as check, check():
     # Subject information
     subjects = config['subjects']
 
+    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
     # Load main data
-    features, labels, _ = subject_pooled_EMG_data(subjects, config)
+    features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
     X   = features
     y   = np.dot(labels,np.array([1,2,3]))

@@ -27,7 +27,7 @@ def one_hot_encode(label_length, category):
     return y
 
 
-def convert_to_array(subject, trial, config):
+def convert_to_array(subject, trial, path, sensor, config):
     """Converts the edf files in eeg and robot dataset into arrays.
 
     Parameter
@@ -40,6 +40,10 @@ def convert_to_array(subject, trial, config):
         The configuration file.
     n_class: int
         The number of classes
+    path : string
+        The path of file
+    sensor : string
+        The selection of data type between 'emg' and 'force'
 
     Returns
     -------
@@ -49,11 +53,11 @@ def convert_to_array(subject, trial, config):
     """
 
     # Read path
-    emg_path = str(Path(__file__).parents[2] / config['epoch_emg_data'])
+    # emg_path = str(Path(__file__).parents[2] / config['epoch_emg_data'])
 
     # Load the data
-    data = dd.io.load(emg_path, group='/' + 'subject_' + subject)
-    epochs = data['emg'][trial]
+    data = dd.io.load(path, group='/' + 'subject_' + subject)
+    epochs = data[sensor][trial]
 
     # Get array data
     x_array = epochs.get_data()
@@ -83,12 +87,12 @@ def convert_to_array(subject, trial, config):
     try:
         y_array = one_hot_encode(x_array.shape[0], category)
     except ImportError:
-        y_array = np.zeros((x_array.shape[0], n_class))
+        y_array = np.zeros((x_array.shape[0], config['n_class']))
 
     return x_array, y_array
 
 
-def clean_epoch_data(subjects, trials, config):
+def clean_epoch_data(subjects, trials, sensor, config):
     """Create feature dataset for all subjects.
 
     Parameter
@@ -97,7 +101,8 @@ def clean_epoch_data(subjects, trials, config):
         String of subject ID e.g. 0001.
     trials : list
         A list of differet trials
-
+    sensor : str
+        Selection of data from sensor: 'emg' or 'force'
     Returns
     -------
     tensors
@@ -112,8 +117,13 @@ def clean_epoch_data(subjects, trials, config):
         x_temp = []
         y_temp = []
         for trial in trials:
+            if (sensor == 'emg'):
+                path = str(Path(__file__).parents[2] / config['epoch_emg_data'])
+            elif (sensor == 'force'):
+                path = str(Path(__file__).parents[2] / config['epoch_force_data'])
+
             # Concatenate the data corresponding to all trials types
-            x_array, y_array = convert_to_array(subject, trial, config)
+            x_array, y_array = convert_to_array(subject, trial, path, sensor, config)
             x_temp.append(x_array)
             y_temp.append(y_array)
 
