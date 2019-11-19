@@ -512,9 +512,10 @@ def get_robot_force_data(subject, trial, config):
     """
     # path of the files
     if subject in config['subjects2']:
-        trial_path = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial
+        trial_path = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'PB.csv'
     else:
         trial_path = get_trial_path(subject, trial, config, robot=True)
+    
     # read the data
     force_data = np.genfromtxt(trial_path,
                                 dtype=float,
@@ -531,7 +532,7 @@ def get_robot_force_data(subject, trial, config):
                                 skip_header=config['skip_header']).tolist()
 
     # difference in force
-    # force_data = np.diff(force_data, n=1, axis=1)
+    force_data = np.diff(force_data, n=1, axis=1)
     
     # Average time
     time = [datetime.strptime(item, '%H:%M:%S:%f') for item in time_data]

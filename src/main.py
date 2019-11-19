@@ -372,28 +372,28 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
     print("Inter-subject tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
-with skip_run('run', 'create_force_data') as check, check():
+with skip_run('skip', 'create_force_data') as check, check():
     data = create_force_data(config['subjects'], config['trials'], config)
     
     # save the data
     path = Path(__file__).parents[1] / config['raw_force_data']
     dd.io.save(str(path), data)
 
-with skip_run('run', 'create_force_epoch') as check, check():
+with skip_run('skip', 'create_force_epoch') as check, check():
     data = create_force_epoch(config['subjects'], config['trials'], config)
     
     # save the data
     path = Path(__file__).parents[1] / config['epoch_force_data']
     dd.io.save(str(path), data)
 
-with skip_run('run', 'clean epoch_data') as check, check():
+with skip_run('skip', 'clean epoch_data') as check, check():
     data = clean_epoch_data(config['subjects'], config['trials'], 'force', config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['clean_force_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('run', 'classify_using_riemannian_force_features') as check, check():
+with skip_run('skip', 'classify_using_riemannian_force_features') as check, check():
     # Subject information
     subjects = config['subjects']
     path = str(Path(__file__).parents[1] / config['clean_force_data'])
@@ -469,11 +469,11 @@ with skip_run('skip', 'project_EMG_Riemannian_features_data') as check, check():
     plt.show()
 
 #-- Projecting the force and velocity data onto manifolds --#
-with skip_run('skip', 'project_Force_data') as check, check():
+with skip_run('run', 'project_Force_data') as check, check():
     # Subject information
     subjects = config['subjects']
 
-    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
+    path = str(Path(__file__).parents[1] / config['clean_force_data'])
     # Load main data
     features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
