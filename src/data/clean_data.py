@@ -43,7 +43,7 @@ def convert_to_array(subject, trial, path, sensor, config):
     path : string
         The path of file
     sensor : string
-        The selection of data type between 'emg' and 'force'
+        The selection of data type between 'emg' and 'PB'
 
     Returns
     -------
@@ -102,7 +102,7 @@ def clean_epoch_data(subjects, trials, sensor, config):
     trials : list
         A list of differet trials
     sensor : str
-        Selection of data from sensor: 'emg' or 'force'
+        Selection of data from sensor: 'emg' or 'PB'
     Returns
     -------
     tensors
@@ -119,8 +119,8 @@ def clean_epoch_data(subjects, trials, sensor, config):
         for trial in trials:
             if (sensor == 'emg'):
                 path = str(Path(__file__).parents[2] / config['epoch_emg_data'])
-            elif (sensor == 'force'):
-                path = str(Path(__file__).parents[2] / config['epoch_force_data'])
+            elif (sensor == 'PB'):
+                path = str(Path(__file__).parents[2] / config['epoch_PB_data'])
 
             # Concatenate the data corresponding to all trials types
             x_array, y_array = convert_to_array(subject, trial, path, sensor, config)

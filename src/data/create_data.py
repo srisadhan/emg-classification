@@ -493,8 +493,8 @@ def get_robot_data(subject, trial, config):
     return robot_data
 
 
-def get_robot_force_data(subject, trial, config):
-    """Get the force and velocity data of a subject and a trial.
+def get_PB_data(subject, trial, config):
+    """Get the force and position data of a subject and a trial.
 
     Parameters
     ----------
@@ -515,13 +515,13 @@ def get_robot_force_data(subject, trial, config):
         trial_path = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'PB.csv'
     else:
         trial_path = get_trial_path(subject, trial, config, robot=True)
-    
+
     # read the data
-    force_data = np.genfromtxt(trial_path,
+    pb_data = np.genfromtxt(trial_path,
                                 dtype=float,
                                 delimiter=',',
                                 unpack=True,
-                                usecols=[13, 14],
+                                usecols=[13, 14, 19, 20],
                                 skip_footer=config['skip_footer'],
                                 skip_header=config['skip_header'])
     time_data = np.genfromtxt(trial_path,
@@ -531,8 +531,8 @@ def get_robot_force_data(subject, trial, config):
                                 skip_footer=config['skip_footer'],
                                 skip_header=config['skip_header']).tolist()
 
-    # difference in force
-    force_data = np.diff(force_data, n=1, axis=1)
+    # difference in force - (when used as a feature is not yielding good results)
+    # force_data = np.diff(force_data, n=1, axis=1)
     
     # Average time
     time = [datetime.strptime(item, '%H:%M:%S:%f') for item in time_data]
@@ -544,13 +544,13 @@ def get_robot_force_data(subject, trial, config):
     sfreq = 1 / np.mean(np.diff(time))
 
     # creating an mne object
-    info = mne.create_info(ch_names=['Fx', 'Fy'], sfreq=sfreq, ch_types=['misc'] * 2)
-    raw = mne.io.RawArray(force_data, info, verbose=False)
+    info = mne.create_info(ch_names=['Fx', 'Fy', 'X', 'Y'], sfreq=sfreq, ch_types=['misc'] * 4)
+    raw = mne.io.RawArray(pb_data, info, verbose=False)
 
     return raw, time
 
 
-def create_force_data(subjects, trials, config):
+def create_PB_data(subjects, trials, config):
     """Create the force data with each subject data in a dictionary.
 
     Parameter
@@ -568,22 +568,23 @@ def create_force_data(subjects, trials, config):
         A data (dict) of all the subjects with different conditions
 
     """
-    force_data = {}
+    PB_data = {}
     # Loop over all subjects and error types
     for subject in subjects:
         data = collections.defaultdict(dict)
+        print(subject)
         for trial in trials:
-            raw_data, time = get_robot_force_data(subject, trial, config)              
+            raw_data, time = get_PB_data(subject, trial, config)             
 
-            data['force'][trial] = raw_data
+            data['PB'][trial] = raw_data
             data['time'][trial] = time
 
-        force_data['subject_' + subject] = data
+        PB_data['subject_' + subject] = data
 
-    return force_data
+    return PB_data
 
 
-def get_force_epoch(subject,raw_force, time, config):
+def get_PB_epoch(subject,raw_data, time, config):
     """Create the epoch data from raw data.
 
     Parameter
@@ -607,7 +608,7 @@ def get_force_epoch(subject,raw_force, time, config):
     epoch_length = config['epoch_length']
     overlap = config['overlap']
     
-    raw_cropped = raw_force.copy().resample(config['sfreq'], npad='auto', verbose='error')
+    raw_cropped = raw_data.copy().resample(config['sfreq2'], npad='auto', verbose='error')
 
     events = mne.make_fixed_length_events(raw_cropped,
                                           duration=epoch_length,
@@ -620,7 +621,7 @@ def get_force_epoch(subject,raw_force, time, config):
     return epochs
 
 
-def create_force_epoch(subjects, trials, config):
+def create_PB_epoch(subjects, trials, config):
     """Create the data with each subject data in a dictionary.
 
     Parameter
@@ -640,23 +641,24 @@ def create_force_epoch(subjects, trials, config):
     """
 
     # Empty dictionary
-    force_epochs = {}
+    data_epochs = {}
 
     # Load the data
-    read_path = Path(__file__).parents[2] / config['raw_force_data']
+    read_path = Path(__file__).parents[2] / config['raw_PB_data']
     data = dd.io.load(str(read_path))
 
     # Loop over all subjects and error types
     for subject in subjects:
         temp = collections.defaultdict(dict)
         for trial in trials:
-            raw_force = data['subject_' + subject]['force'][trial]
+            raw_data = data['subject_' + subject]['PB'][trial]
             time = data['subject_' + subject]['time'][trial]
 
             # Create epoch data
-            temp['force'][trial] = get_force_epoch(subject,raw_force, time, config)
-        force_epochs['subject_' + subject] = temp
+            temp['PB'][trial] = get_PB_epoch(subject,raw_data, time, config)
 
-    return force_epochs
+        data_epochs['subject_' + subject] = temp
+
+    return data_epochs
 
 

@@ -17,8 +17,8 @@ from pyriemann.tangentspace import TangentSpace, FGDA
 from pathlib import Path
 import collections
 from data.clean_data import clean_epoch_data
-from data.create_data import (create_emg_data, create_emg_epoch, create_force_data,
-                              create_force_epoch, create_robot_dataframe,
+from data.create_data import (create_emg_data, create_emg_epoch, create_PB_data,
+                              create_PB_epoch, create_robot_dataframe,
                               sort_order_emg_channels)
 from data.create_data_sri import read_Pos_Force_data, epoch_raw_emg, pool_emg_data
 
@@ -325,6 +325,13 @@ with skip_run('skip', 'classify_using_riemannian_emg_features') as check, check(
     # project the covariance into the tangent space
     ts = TangentSpace().fit_transform(covest)
 
+    # Singular Value Decomposition of covest
+    # V = np.zeros((covest.shape[0], covest.shape[1] * covest.shape[2]))
+    # for i in range(0, covest.shape[0]):
+    #     _, _, v = np.linalg.svd(covest[i])
+    #     V[i,:] = np.ravel(v, order ='F')
+
+
     # SVM classifier
     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
     # Random forest classifier
@@ -372,26 +379,51 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
     print("Inter-subject tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
-with skip_run('skip', 'create_force_data') as check, check():
-    data = create_force_data(config['subjects'], config['trials'], config)
+with skip_run('run', 'create_PB_data') as check, check():
+    data = create_PB_data(config['subjects'], config['trials'], config)
     
     # save the data
-    path = Path(__file__).parents[1] / config['raw_force_data']
+    path = Path(__file__).parents[1] / config['raw_PB_data']
     dd.io.save(str(path), data)
 
-with skip_run('skip', 'create_force_epoch') as check, check():
-    data = create_force_epoch(config['subjects'], config['trials'], config)
+with skip_run('skip', 'create_PB_epoch') as check, check():
+    data = create_PB_epoch(config['subjects'], config['trials'], config)
     
     # save the data
-    path = Path(__file__).parents[1] / config['epoch_force_data']
+    path = Path(__file__).parents[1] / config['epoch_PB_data']
     dd.io.save(str(path), data)
 
-with skip_run('skip', 'clean epoch_data') as check, check():
-    data = clean_epoch_data(config['subjects'], config['trials'], 'force', config)
+with skip_run('skip', 'clean_epoch_data') as check, check():
+    data = clean_epoch_data(config['subjects'], config['trials'], 'PB', config)
 
     # Save the dataset
-    save_path = Path(__file__).parents[1] / config['clean_force_data']
+    save_path = Path(__file__).parents[1] / config['clean_PB_data']
     save_data(str(save_path), data, save=True)
+
+with skip_run('skip', 'classify_using_mean_force_features') as check, check():
+    # Subject information
+    subjects = config['subjects']
+    path = str(Path(__file__).parents[1] / config['clean_PB_data'])
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
+    
+    X   = features[:,0:2,:]
+    y   = np.dot(labels,np.array([1,2,3]))
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
+
+    ts = np.mean(X, axis=2)
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    accuracy = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
 
 with skip_run('skip', 'classify_using_riemannian_force_features') as check, check():
     # Subject information
@@ -400,8 +432,44 @@ with skip_run('skip', 'classify_using_riemannian_force_features') as check, chec
     # Load main data
     features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
-    X   = features
+    X   = features[:,0:2,:]
     y   = np.dot(labels,np.array([1,2,3]))
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    accuracy = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+with skip_run('skip', 'classify_using_emg_and_force_features') as check, check():
+    # Subject information
+    subjects = config['subjects']
+    
+    # Load main data
+    path1 = str(Path(__file__).parents[1] / config['clean_emg_data'])
+    features1, labels1, _ = subject_pooled_EMG_data(subjects, path1, config)
+
+    path2 = str(Path(__file__).parents[1] / config['clean_force_data'])
+    features2, labels2, _ = subject_pooled_EMG_data(subjects, path2, config)
+
+    print('EMG samples: %d, Force samples: %d ' %(features1.shape[0], features2[0:features1.shape[0],:].shape[0]))
+    # sys.exit()
+
+    X   = np.concatenate((features1, features2[0:features1.shape[0],0:2,:]), axis=1)
+    y   = np.dot(labels1,np.array([1,2,3]))
     print(X.shape)
     print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
 
@@ -439,7 +507,11 @@ with skip_run('skip', 'project_EMG_Riemannian_features_data') as check, check():
     covest = Covariances().fit_transform(X)
 
     # project the covariance into the tangent space
-    ts = TangentSpace().fit_transform(covest)
+    # ts = TangentSpace().fit_transform(covest)
+
+    ts = np.reshape(covest, (covest.shape[0], covest.shape[1] * covest.shape[2]), order='C')
+    print(ts.shape)
+    ts = ts[:,0:36]
 
     print('t-SNE based data visualization')
     temp1 = y == 1
@@ -469,7 +541,7 @@ with skip_run('skip', 'project_EMG_Riemannian_features_data') as check, check():
     plt.show()
 
 #-- Projecting the force and velocity data onto manifolds --#
-with skip_run('run', 'project_Force_data') as check, check():
+with skip_run('skip', 'project_Force_data') as check, check():
     # Subject information
     subjects = config['subjects']
 
@@ -477,14 +549,18 @@ with skip_run('run', 'project_Force_data') as check, check():
     # Load main data
     features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
-    X   = features
+    X   = features[:,0:2,:]
     y   = np.dot(labels,np.array([1,2,3]))
 
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
 
     # project the covariance into the tangent space
-    ts = TangentSpace().fit_transform(covest)
+    # ts = TangentSpace().fit_transform(covest)
+    
+    ts = np.reshape(covest, (covest.shape[0], covest.shape[1] * covest.shape[2]), order='C')
+    print(ts.shape)
+    ts = ts[:,0:36]
 
     print('t-SNE based data visualization')
     temp1 = y == 1
@@ -502,15 +578,19 @@ with skip_run('run', 'project_Force_data') as check, check():
 
     # UMAP based projection
     for neighbor in [10, 30, 60 ]:
-        fit = UMAP(n_neighbors=neighbor, min_dist=0.0, n_components=3,metric='chebyshev')
+        fit = UMAP(n_neighbors=neighbor, min_dist=0.5, n_components=3)
         X_embedded = fit.fit_transform(ts)
     
         fig = plt.figure()
         ax = Axes3D(fig)
-    
+
+        # plt.plot(X_embedded[temp1,0],X_embedded[temp1,1],'bo')
+        # plt.plot(X_embedded[temp2,0],X_embedded[temp2,1],'ro')
+        # plt.plot(X_embedded[temp3,0],X_embedded[temp3,1],'ko')
+
         ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],X_embedded[temp1,2],'bo')
         ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],X_embedded[temp2,2],'ro')
-        ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'ko')
+        # ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'ko')
     plt.show()
 
 ## ----------alternative code for reading csv files----------##
