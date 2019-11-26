@@ -27,8 +27,9 @@ features          : ['RMS', 'TD', 'HIST', 'mDWT']
 ##---------------------------------------------------------------------##
 # Experiment 0
 # All subjects are used for training and testing
-subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820','8821','8822', '8823', '8824', '9001', '9002', '9003', '9004']
-subjects2:            ['9001', '9002', '9003', '9004']
+subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820','8821','8822', '8823', '8824', '9001_1', '9002_1', '9003_1', '9004_1', '9006_1', '9007_1', '9003_2', '9005_2']
+subjects2:            ['9001_1', '9002_1', '9003_1', '9004_1', '9005_2', '9006_1', '9007_1', '9003_2']
+subjectTest:          ['9003_2', '9005_2']
 test_subjects:        []
 trials:               ['HighFine', 'HighGross', 'LowFine', 'LowGross']
 skip_header:          2000
@@ -45,6 +46,7 @@ epoch_emg_data:       'data/processed/epoch_emg_exp_0_dataset.h5'
 epoch_PB_data:        'data/processed/epoch_force_exp_0_dataset.h5'
 clean_emg_data:       'data/processed/clean_emg_exp_0_dataset.h5'
 clean_PB_data:        'data/processed/clean_force_exp_0_dataset.h5'
+clean_emg_pb_data:    'data/processed/clean_force_pos_emg_exp_0_dataset.h5' 
 torch_dataset:        'data/processed/torch_exp_0_dataset.h5'
 statistics_dataframe: 'data/processed/statistics_exp_0_dataset.h5'
 matlab_dataframe:     'data/external/matlab_dataframe.csv'

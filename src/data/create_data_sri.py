@@ -109,7 +109,7 @@ def read_EMG_data(subject, time_window, trials):
     for file in file_path.iterdir():
         temp = file.name.split('-')
 
-        if temp[0] == 'emg':
+        if temp[0] == 'EMG':
             # Get the EMG and time data
             total_data = np.genfromtxt(file,
                                      dtype=float,

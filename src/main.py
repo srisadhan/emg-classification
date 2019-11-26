@@ -16,7 +16,7 @@ from pyriemann.tangentspace import TangentSpace, FGDA
 
 from pathlib import Path
 import collections
-from data.clean_data import clean_epoch_data
+from data.clean_data import clean_epoch_data, clean_combined_data
 from data.create_data import (create_emg_data, create_emg_epoch, create_PB_data,
                               create_PB_epoch, create_robot_dataframe,
                               sort_order_emg_channels)
@@ -64,15 +64,15 @@ with skip_run('skip', 'create_emg_data') as check, check():
     save_path = Path(__file__).parents[1] / config['raw_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'create_epoch_data') as check, check():
+with skip_run('skip', 'create_emg_epoch') as check, check():
     data = create_emg_epoch(config['subjects'], config['trials'], config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['epoch_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'clean_epoch_data') as check, check():
-    data = clean_epoch_data(config['subjects'], config['trials'], 'emg', config)
+with skip_run('skip', 'clean_emg_epoch') as check, check():
+    data = clean_epoch_data(config['subjects'], config['trials'], 'EMG', config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['clean_emg_data']
@@ -306,6 +306,29 @@ with skip_run('skip', 'balance_pooled_emg_features') as check, check():
 ##-- Classification with 4 main sets of features RMS, TD, HIST, mDWT (October results)--##
 ## ----------------------------------------------------------##
 
+# -- Create Robot data -- #
+with skip_run('run', 'create_PB_data') as check, check():
+    data = create_PB_data(config['subjects'], config['trials'], config)
+    # save the data
+    path = Path(__file__).parents[1] / config['raw_PB_data']
+    dd.io.save(str(path), data)
+
+with skip_run('run', 'create_PB_epoch') as check, check():
+    data = create_PB_epoch(config['subjects'], config['trials'], config)
+    
+    # save the data
+    path = Path(__file__).parents[1] / config['epoch_PB_data']
+    dd.io.save(str(path), data)
+
+with skip_run('run', 'clean_PB_epoch_data') as check, check():
+    data = clean_epoch_data(config['subjects'], config['trials'], 'PB', config)
+
+    # Save the dataset
+    save_path = Path(__file__).parents[1] / config['clean_PB_data']
+    save_data(str(save_path), data, save=True)
+
+
+# -------------------- Classification --------------------- #
 ##-- Classification using Riemannian features--##
 with skip_run('skip', 'classify_using_riemannian_emg_features') as check, check():
     # Subject information
@@ -342,63 +365,6 @@ with skip_run('skip', 'classify_using_riemannian_emg_features') as check, check(
 
     accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
     print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
-
-with skip_run('skip', 'inter_subject_transferability_using_riemannian_features') as check, check():
-    # Subject information
-    subjects = copy.copy(config['subjects'])
-    random.shuffle(subjects)
-
-    # Number of subjects to train the classifier
-    N = 8
-
-    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
-    # Load main data
-    train_x, train_y, _ = subject_pooled_EMG_data(subjects[0:N], path, config)
-    test_x, test_y, _   = subject_pooled_EMG_data(subjects[N:], path, config)
-
-    train_y = np.dot(train_y,np.array([1,2,3]))
-    test_y  = np.dot(test_y,np.array([1,2,3]))
-
-    # print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
-
-    # estimation of the covariance matrix and its projection in tangent space
-    train_cov = Covariances().fit_transform(train_x)
-    train_ts  = TangentSpace().fit_transform(train_cov)
-
-    test_cov  = Covariances().fit_transform(test_x)
-    test_ts   = TangentSpace().fit_transform(test_cov)
-
-    # SVM classifier
-    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
-    # Random forest classifier
-    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
-
-    accuracy = clf1.fit(train_ts, train_y).score(test_ts, test_y)
-    print("Inter-subject tranfer accuracy using SVM: %0.4f " % accuracy.mean())
-
-    accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
-    print("Inter-subject tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
-
-with skip_run('run', 'create_PB_data') as check, check():
-    data = create_PB_data(config['subjects'], config['trials'], config)
-    
-    # save the data
-    path = Path(__file__).parents[1] / config['raw_PB_data']
-    dd.io.save(str(path), data)
-
-with skip_run('skip', 'create_PB_epoch') as check, check():
-    data = create_PB_epoch(config['subjects'], config['trials'], config)
-    
-    # save the data
-    path = Path(__file__).parents[1] / config['epoch_PB_data']
-    dd.io.save(str(path), data)
-
-with skip_run('skip', 'clean_epoch_data') as check, check():
-    data = clean_epoch_data(config['subjects'], config['trials'], 'PB', config)
-
-    # Save the dataset
-    save_path = Path(__file__).parents[1] / config['clean_PB_data']
-    save_data(str(save_path), data, save=True)
 
 with skip_run('skip', 'classify_using_mean_force_features') as check, check():
     # Subject information
@@ -490,9 +456,82 @@ with skip_run('skip', 'classify_using_emg_and_force_features') as check, check()
     accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
     print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
 
-## ----------------------------------------------------------##
-#-- Projecting the EMG data onto manifolds --#
-with skip_run('skip', 'project_EMG_Riemannian_features_data') as check, check():
+
+# -------------- Classifier transferability ----------------- #
+with skip_run('skip', 'inter_subject_transferability_using_riemannian_features') as check, check():
+    # Subject information
+    subjects = copy.copy(config['subjects'])
+    random.shuffle(subjects)
+
+    # Number of subjects to train the classifier
+    N = 8
+
+    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
+    # Load main data
+    train_x, train_y, _ = subject_pooled_EMG_data(subjects[0:N], path, config)
+    test_x, test_y, _   = subject_pooled_EMG_data(subjects[N:], path, config)
+
+    train_y = np.dot(train_y,np.array([1,2,3]))
+    test_y  = np.dot(test_y,np.array([1,2,3]))
+
+    # print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
+
+    # estimation of the covariance matrix and its projection in tangent space
+    train_cov = Covariances().fit_transform(train_x)
+    train_ts  = TangentSpace().fit_transform(train_cov)
+
+    test_cov  = Covariances().fit_transform(test_x)
+    test_ts   = TangentSpace().fit_transform(test_cov)
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    accuracy = clf1.fit(train_ts, train_y).score(test_ts, test_y)
+    print("Inter-subject tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
+    print("Inter-subject tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+with skip_run('skip', 'inter_session_transferability_using_riemannian_features') as check, check():
+    # Subject information
+    subjects_train = config['subjects']
+    subjects_test = config['subjectTest']
+
+    path = str(Path(__file__).parents[1] / config['clean_emg_data'])
+
+    # Load main data
+    train_x, train_y, _ = subject_pooled_EMG_data(subjects_train, path, config)
+    test_x, test_y, _ = subject_pooled_EMG_data(subjects_test, path, config)
+    
+    train_y = np.dot(train_y,np.array([1,2,3]))
+    test_y = np.dot(test_y,np.array([1,2,3]))
+
+
+    # print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
+
+    # estimation of the covariance matrix and its projection in tangent space
+    train_cov = Covariances().fit_transform(train_x)
+    train_ts  = TangentSpace().fit_transform(train_cov)
+
+    test_cov  = Covariances().fit_transform(test_x)
+    test_ts   = TangentSpace().fit_transform(test_cov)
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    accuracy = clf1.fit(train_ts, train_y).score(test_ts, test_y)
+    print("Inter-sessio tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+
+## ------------Project features on to manifold----------------##
+with skip_run('skip', 'project_EMG_features') as check, check():
     # Subject information
     subjects = config['subjects']
 
@@ -540,7 +579,6 @@ with skip_run('skip', 'project_EMG_Riemannian_features_data') as check, check():
         ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'ko')
     plt.show()
 
-#-- Projecting the force and velocity data onto manifolds --#
 with skip_run('skip', 'project_Force_data') as check, check():
     # Subject information
     subjects = config['subjects']
@@ -593,8 +631,26 @@ with skip_run('skip', 'project_Force_data') as check, check():
         # ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'ko')
     plt.show()
 
+
+## ------------Plot the predicted labels vs position ----------------##
+with skip_run('run', 'save_EMG_PB_data') as check, check():
+    
+    subjects = config['subjects']
+    features = clean_combined_data(subjects, config['trials'], 3, config)
+
+    # path to save
+    path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
+    dd.io.save(path, features)
+
+with skip_run('skip', 'plot_predicted_labels') as check, check():
+    subjects = config['subjects']
+
+    features = clean_combined_data(subjects, config['trials'], 3, config)
+
+    features
+
+
 ## ----------alternative code for reading csv files----------##
-##-- Task type classification using Riemannian features --#
 with skip_run('skip', 'epoch_raw_emg_data') as check, check():
     # Subject information
     subjects = config['subjects']
