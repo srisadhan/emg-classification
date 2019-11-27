@@ -621,32 +621,34 @@ def get_PB_data(subject, trial, config):
 
     # read the data
     PB_data = np.genfromtxt(PB_path,
-                                dtype=float,
-                                delimiter=',',
-                                unpack=True,
-                                usecols=[13, 14, 19, 20],
-                                skip_footer=config['skip_footer'],
-                                skip_header=config['skip_header'])
+                            dtype=float,
+                            delimiter=',',
+                            unpack=True,
+                            usecols=[13, 14, 19, 20],
+                            skip_footer=config['skip_footer'],
+                            skip_header=config['skip_header'])
     time_data = np.genfromtxt(PB_path,
-                                dtype=str,
-                                delimiter=',',
-                                unpack=True,
-                                usecols=0,
-                                skip_footer=config['skip_footer'],
-                                skip_header=config['skip_header'])
+                            dtype=str,
+                            delimiter=',',
+                            unpack=True,
+                            usecols=0,
+                            skip_footer=config['skip_footer'],
+                            skip_header=config['skip_header'])
 
     # get the actual trial start and end time based on the PB and MYO data
     if subject in config['subjects2']:
         trial_start, trial_end, _ = get_trial_time_exp2(subject, trial, PB_path, EMG_path, config)
+        time_data, sfreq = convert_time(time_data)
+        
+        indices = np.all([time_data >= trial_start, time_data <= trial_end], axis=0)
+
+        time_data = time_data[indices[:,0]]
+        PB_data   = PB_data[:,indices[:,0]]
+
     else:
         trial_start, trial_end, _ = get_trial_time(subject, trial, config)
-
-    time_data, sfreq = convert_time(time_data)
-
-    indices = np.all([time_data >= trial_start, time_data <= trial_end], axis=0)
-
-    time_data = time_data[indices[:,0]]
-    PB_data   = PB_data[:,indices[:,0]]
+        time_data, sfreq = convert_time(time_data)
+    
     
     # creating an mne object
     info = mne.create_info(ch_names=['Fx', 'Fy', 'X', 'Y'], sfreq=sfreq, ch_types=['misc'] * 4)

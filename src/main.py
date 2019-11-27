@@ -22,14 +22,18 @@ from data.create_data import (create_emg_data, create_emg_epoch, create_PB_data,
                               sort_order_emg_channels)
 from data.create_data_sri import read_Pos_Force_data, epoch_raw_emg, pool_emg_data
 
-from datasets.riemann_datasets import subject_pooled_EMG_data, train_test_data, subject_dependent_data
+from datasets.riemann_datasets import (subject_pooled_EMG_data, 
+                                       train_test_data, 
+                                       subject_dependent_data,
+                                       subject_pooled_EMG_PB_data,
+                                       split_pooled_EMG_PB_data_train_test)
 
 from datasets.torch_datasets import pooled_data_iterator
 from datasets.statistics_dataset import matlab_dataframe
 
-from models.riemann_models import (svm_tangent_space_classifier,
+from models.riemann_models import (tangent_space_classifier,
                                    svm_tangent_space_cross_validate,
-                                   svm_tangent_space_prediction)
+                                   tangent_space_prediction)
 from models.statistical_models import mixed_effect_model
 from models.torch_models import train_torch_model
 from models.torch_networks import ShallowERPNet
@@ -129,8 +133,8 @@ with skip_run('skip', 'svm_pooled_riemannian_features') as check, check():
     data = train_test_data(features, labels, leave_tags, config)
 
     # Train the classifier and predict on test data
-    clf = svm_tangent_space_classifier(data['train_x'], data['train_y'])
-    svm_tangent_space_prediction(clf, data['test_x'], data['test_y'])
+    clf = tangent_space_classifier(data['train_x'], data['train_y'], 'svc')
+    tangent_space_prediction(clf, data['test_x'], data['test_y'])
 
 with skip_run('skip', 'svm_cross_validated_pooled_data') as check, check():
     path = str(Path(__file__).parents[1] / config['clean_emg_data'])
@@ -307,20 +311,20 @@ with skip_run('skip', 'balance_pooled_emg_features') as check, check():
 ## ----------------------------------------------------------##
 
 # -- Create Robot data -- #
-with skip_run('run', 'create_PB_data') as check, check():
+with skip_run('skip', 'create_PB_data') as check, check():
     data = create_PB_data(config['subjects'], config['trials'], config)
     # save the data
     path = Path(__file__).parents[1] / config['raw_PB_data']
-    dd.io.save(str(path), data)
+    save_data(str(path), data, True)
 
-with skip_run('run', 'create_PB_epoch') as check, check():
+with skip_run('skip', 'create_PB_epoch') as check, check():
     data = create_PB_epoch(config['subjects'], config['trials'], config)
     
     # save the data
     path = Path(__file__).parents[1] / config['epoch_PB_data']
     dd.io.save(str(path), data)
 
-with skip_run('run', 'clean_PB_epoch_data') as check, check():
+with skip_run('skip', 'clean_PB_epoch_data') as check, check():
     data = clean_epoch_data(config['subjects'], config['trials'], 'PB', config)
 
     # Save the dataset
@@ -633,7 +637,7 @@ with skip_run('skip', 'project_Force_data') as check, check():
 
 
 ## ------------Plot the predicted labels vs position ----------------##
-with skip_run('run', 'save_EMG_PB_data') as check, check():
+with skip_run('skip', 'save_EMG_PB_data') as check, check():
     
     subjects = config['subjects']
     features = clean_combined_data(subjects, config['trials'], 3, config)
@@ -642,13 +646,62 @@ with skip_run('run', 'save_EMG_PB_data') as check, check():
     path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
     dd.io.save(path, features)
 
-with skip_run('skip', 'plot_predicted_labels') as check, check():
+with skip_run('skip', 'split_pooled_subject_EMG_PB_data') as check, check():
+    
     subjects = config['subjects']
+    # load the data
+    path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
+    Data = split_pooled_EMG_PB_data_train_test(subjects, path, config)
 
-    features = clean_combined_data(subjects, config['trials'], 3, config)
+    # path to save the file
+    path = str(Path(__file__).parents[1] / config['split_pooled_EMG_PB_data'])
+    save_data(path, Data, save=True)
 
-    features
+with skip_run('skip', 'store_predicted_and_true_labels_vs_pos') as check, check():
+    # path to save the file
+    path = str(Path(__file__).parents[1] / config['split_pooled_EMG_PB_data'])
+    Data = dd.io.load(path)
+    
+    clf = tangent_space_classifier(Data['train']['X'], Data['train']['y'], 'svc')
+    predictions = tangent_space_prediction(clf, Data['test']['X'], Data['test']['y'])
 
+    data = {}
+    data['true'] = Data['test']['y']
+    data['predicted'] = predictions
+    data['pos']  = Data['test']['pos']
+
+    # path to save the file
+    path = str(Path(__file__).parents[1] / config['true_and_predicted_labels'])
+    save_data(path, data, save=True)
+
+with skip_run('run', 'plot_predicted_vs_true_labels') as check, check():
+    # path to save the file
+    path = str(Path(__file__).parents[1] / config['true_and_predicted_labels'])
+    Data = dd.io.load(path)
+
+    true_labels         = Data['true']
+    predicted_labels    = Data['predicted']
+    pos                 = Data['pos']
+
+    indices = np.arange(0, len(true_labels))
+    
+    for label in [1, 2]:
+        category = indices[true_labels == label]
+
+        temp_label = true_labels[category]
+        temp_pred  = predicted_labels[category]
+        temp_pos   = pos[category]
+        
+        temp_ind   = np.arange(0, len(temp_label))
+        correct_pred = temp_ind[temp_label == temp_pred]
+        wrong_pred  = temp_ind[temp_label != temp_pred]
+
+        fig = plt.figure()
+        ax = Axes3D(fig)             
+        ax.plot(temp_pos[correct_pred,0], temp_pos[correct_pred,1], 0 * temp_pos[correct_pred,1],'g*')
+        ax.plot(temp_pos[wrong_pred,0], temp_pos[wrong_pred,1], 1 + 0 * temp_pos[wrong_pred,1], 'r*')
+
+    plt.show()
 
 ## ----------alternative code for reading csv files----------##
 with skip_run('skip', 'epoch_raw_emg_data') as check, check():

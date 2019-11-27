@@ -182,7 +182,7 @@ def convert_combined_data_to_array(subject, trial, path1, path2, n_class, config
     EMG_array = EMG_array[:array_len, :, :]
     PB_array  = PB_array[:array_len, 2:, :] 
     
-    PB_array  = PB_array.mean(axis=1) # consider average location in the epoch.
+    PB_array  = PB_array.mean(axis=2) # consider average location in the epoch.
 
     if n_class == 3:
 

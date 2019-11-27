@@ -1,16 +1,17 @@
 import numpy as np
 
 from pyriemann.embedding import Embedding
-from pyriemann.estimation import XdawnCovariances
+from pyriemann.estimation import XdawnCovariances, Covariances
 from pyriemann.tangentspace import TangentSpace
 
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import cross_val_score, KFold
 from sklearn.pipeline import Pipeline
 from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
 
 
-def svm_tangent_space_classifier(features, labels):
+def tangent_space_classifier(features, labels, classifier):
     """A tangent space classifier with svm for 3 classes.
 
     Parameters
@@ -19,7 +20,8 @@ def svm_tangent_space_classifier(features, labels):
         A array of features
     labels : array
         True labels
-
+    classifier : string
+        option : Support Vector Machines (svc) or Random Forest (rf)
     Returns
     -------
     sklearn classifier
@@ -27,18 +29,28 @@ def svm_tangent_space_classifier(features, labels):
 
     """
     # Construct sklearn pipeline
-    n_components = 3  # pick some components
-    clf = Pipeline([('xdawn_transform',
-                     XdawnCovariances(n_components, estimator='lwf')),
-                    ('tangent_space', TangentSpace(metric='riemann')),
-                    ('svm_classify', SVC(kernel='rbf', gamma='auto'))])
+
+    if classifier == 'svc':        
+        clf = Pipeline([('covariance_transform',
+                        Covariances(estimator='scm')),
+                        ('tangent_space', TangentSpace(metric='riemann')),
+                        ('classifier', SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr'))])
+    elif classifier == 'rf':
+        clf = Pipeline([('covariance_transform',
+                        Covariances(estimator='scm')),
+                        ('tangent_space', TangentSpace(metric='riemann')),
+                        ('classifier', RandomForestClassifier(n_estimators=100, oob_score=True))])
+    else:
+        print("Please select the appropriate classifier ")
+        return
+        
     # cross validation
     clf.fit(features, labels)
 
     return clf
 
 
-def svm_tangent_space_prediction(clf, features, true_labels):
+def tangent_space_prediction(clf, features, true_labels):
     """Predict from learnt tangent space classifier.
 
     Parameters
@@ -86,9 +98,8 @@ def svm_tangent_space_cross_validate(data):
 
     print('Shape of the feature data: ', x.shape)
     # Construct sklearn pipeline
-    n_components = 3  # pick some components
-    clf = Pipeline([('xdawn_transform',
-                     XdawnCovariances(n_components, estimator='lwf')),
+    clf = Pipeline([('covariance_transform',
+                     Covariances( estimator='scm')),
                     ('tangent_space', TangentSpace(metric='riemann')),
                     ('svm_classify', SVC(kernel='rbf', gamma='auto'))])
 
