@@ -300,20 +300,20 @@ def split_pooled_EMG_PB_data_train_test(subjects, path, config):
     train_emg    = train_emg[rus.sample_indices_,:,:]
     train_pos    = train_pos[rus.sample_indices_,:]
     train_labels = train_labels[rus.sample_indices_,:]
-    train_labels = np.dot(train_labels, np.array([1,2,3]))
+    train_labels = np.dot(train_labels, np.array(np.arange(1, config['n_class']+1)))
 
     training_data['X']   = train_emg
     training_data['pos'] = train_pos
     training_data['y']   = train_labels
 
     # check if the classes are balanced
-    print("Training data - Class 1: %f, Class 2: %f, Class 3: %f" %(train_labels[train_labels == 1].shape[0], train_labels[train_labels == 2].shape[0], train_labels[train_labels == 3].shape[0]))
+    print("Training data - Class 1: %f, Class 2: %f, Class 3: %f, Class 4: %f" %(train_labels[train_labels == 1].shape[0], train_labels[train_labels == 2].shape[0], train_labels[train_labels == 3].shape[0], train_labels[train_labels == 4].shape[0]))
 
     # test set
     test_emg        = features_emg[indices[cutoff:],:,:]
     test_pos        = pos[indices[cutoff:],:]
     test_labels     = labels[indices[cutoff:],:]
-    test_labels     = np.dot(test_labels, np.array([1,2,3]))
+    test_labels     = np.dot(test_labels, np.array(np.arange(1, config['n_class']+1)))
 
     testing_data['X']   = test_emg
     testing_data['pos'] = test_pos

@@ -6,13 +6,14 @@ import sys
 import random
 import statistics
 import copy
-import hdf5storage
+# import hdf5storage
 import h5py
 import numpy as np
 from pathlib import Path
 
 from pyriemann.estimation import Covariances, Shrinkage, Coherences
 from pyriemann.tangentspace import TangentSpace, FGDA
+# from pyriemann.utils.viz import plot_confusion_matrix
 
 from pathlib import Path
 import collections
@@ -48,7 +49,7 @@ from models.emg_features import (extract_emg_features, pool_subject_emg_features
                                 lda_cross_validated_pooled_emg_features)
 
 from visualization.visualise import (plot_average_model_accuracy, plot_bar)
-from utils import (skip_run, save_data, save_trained_pytorch_model)
+from utils import (skip_run, save_data, save_trained_pytorch_model, plot_confusion_matrix)
 
 from sklearn.svm import SVC
 from imblearn.under_sampling import RandomUnderSampler
@@ -342,9 +343,9 @@ with skip_run('skip', 'classify_using_riemannian_emg_features') as check, check(
     features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
     X   = features
-    y   = np.dot(labels,np.array([1,2,3]))
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
     print(X.shape)
-    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
 
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
@@ -378,7 +379,7 @@ with skip_run('skip', 'classify_using_mean_force_features') as check, check():
     features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
     
     X   = features[:,0:2,:]
-    y   = np.dot(labels,np.array([1,2,3]))
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
     print(X.shape)
     print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
 
@@ -403,7 +404,7 @@ with skip_run('skip', 'classify_using_riemannian_force_features') as check, chec
     features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
     X   = features[:,0:2,:]
-    y   = np.dot(labels,np.array([1,2,3]))
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
     print(X.shape)
     print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
 
@@ -439,7 +440,7 @@ with skip_run('skip', 'classify_using_emg_and_force_features') as check, check()
     # sys.exit()
 
     X   = np.concatenate((features1, features2[0:features1.shape[0],0:2,:]), axis=1)
-    y   = np.dot(labels1,np.array([1,2,3]))
+    y   = np.dot(labels1,np.array(np.arange(1, config['n_class']+1)))
     print(X.shape)
     print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
 
@@ -475,8 +476,8 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     train_x, train_y, _ = subject_pooled_EMG_data(subjects[0:N], path, config)
     test_x, test_y, _   = subject_pooled_EMG_data(subjects[N:], path, config)
 
-    train_y = np.dot(train_y,np.array([1,2,3]))
-    test_y  = np.dot(test_y,np.array([1,2,3]))
+    train_y = np.dot(train_y,np.array(np.arange(1, config['n_class']+1)))
+    test_y  = np.dot(test_y,np.array(np.arange(1, config['n_class']+1)))
 
     # print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
 
@@ -509,8 +510,8 @@ with skip_run('skip', 'inter_session_transferability_using_riemannian_features')
     train_x, train_y, _ = subject_pooled_EMG_data(subjects_train, path, config)
     test_x, test_y, _ = subject_pooled_EMG_data(subjects_test, path, config)
     
-    train_y = np.dot(train_y,np.array([1,2,3]))
-    test_y = np.dot(test_y,np.array([1,2,3]))
+    train_y = np.dot(train_y,np.array(np.arange(1, config['n_class']+1)))
+    test_y = np.dot(test_y,np.array(np.arange(1, config['n_class']+1)))
 
 
     # print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
@@ -544,7 +545,7 @@ with skip_run('skip', 'project_EMG_features') as check, check():
     features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
     X   = features
-    y   = np.dot(labels,np.array([1,2,3]))
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
 
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
@@ -592,7 +593,7 @@ with skip_run('skip', 'project_Force_data') as check, check():
     features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
     X   = features[:,0:2,:]
-    y   = np.dot(labels,np.array([1,2,3]))
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
 
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
@@ -640,7 +641,7 @@ with skip_run('skip', 'project_Force_data') as check, check():
 with skip_run('skip', 'save_EMG_PB_data') as check, check():
     
     subjects = config['subjects']
-    features = clean_combined_data(subjects, config['trials'], 3, config)
+    features = clean_combined_data(subjects, config['trials'], config['n_class'], config)
 
     # path to save
     path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
@@ -657,7 +658,7 @@ with skip_run('skip', 'split_pooled_subject_EMG_PB_data') as check, check():
     path = str(Path(__file__).parents[1] / config['split_pooled_EMG_PB_data'])
     save_data(path, Data, save=True)
 
-with skip_run('skip', 'store_predicted_and_true_labels_vs_pos') as check, check():
+with skip_run('skip', 'store_predicted_and_true_labels_wrt_pos') as check, check():
     # path to save the file
     path = str(Path(__file__).parents[1] / config['split_pooled_EMG_PB_data'])
     Data = dd.io.load(path)
@@ -675,7 +676,7 @@ with skip_run('skip', 'store_predicted_and_true_labels_vs_pos') as check, check(
     save_data(path, data, save=True)
 
 with skip_run('run', 'plot_predicted_vs_true_labels') as check, check():
-    # path to save the file
+    # location of the file
     path = str(Path(__file__).parents[1] / config['true_and_predicted_labels'])
     Data = dd.io.load(path)
 
@@ -683,23 +684,33 @@ with skip_run('run', 'plot_predicted_vs_true_labels') as check, check():
     predicted_labels    = Data['predicted']
     pos                 = Data['pos']
 
+    if config['n_class'] == 4:
+        classes = config['trials']
+    else:
+        classes = ['HF', 'LG', 'HG - LF']
+
+    plot_confusion_matrix(true_labels, predicted_labels, classes = classes)
+
     indices = np.arange(0, len(true_labels))
     
-    for label in [1, 2]:
+    for label in range(1,config['n_class']+1):
         category = indices[true_labels == label]
 
-        temp_label = true_labels[category]
-        temp_pred  = predicted_labels[category]
+        labels = true_labels[category]
+        predictions = predicted_labels[category]
         temp_pos   = pos[category]
         
-        temp_ind   = np.arange(0, len(temp_label))
-        correct_pred = temp_ind[temp_label == temp_pred]
-        wrong_pred  = temp_ind[temp_label != temp_pred]
+        temp_ind   = np.arange(0, len(labels))
+        correct_pred = temp_ind[labels == predictions]
+        wrong_pred  = temp_ind[labels != predictions]
 
         fig = plt.figure()
         ax = Axes3D(fig)             
-        ax.plot(temp_pos[correct_pred,0], temp_pos[correct_pred,1], 0 * temp_pos[correct_pred,1],'g*')
-        ax.plot(temp_pos[wrong_pred,0], temp_pos[wrong_pred,1], 1 + 0 * temp_pos[wrong_pred,1], 'r*')
+        # ax.plot(temp_pos[correct_pred,0], temp_pos[correct_pred,1], 0 * temp_pos[correct_pred,1], 'g.')
+        # ax.plot(temp_pos[wrong_pred,0], temp_pos[wrong_pred,1], 1 + 0 * temp_pos[wrong_pred,1], 'r.') 
+        ax.plot(temp_pos[correct_pred,0], temp_pos[correct_pred,1], predictions[correct_pred], 'g.')
+        ax.plot(temp_pos[wrong_pred,0], temp_pos[wrong_pred,1], predictions[wrong_pred], 'r.')
+        ax.set_zticklabels(classes)
 
     plt.show()
 

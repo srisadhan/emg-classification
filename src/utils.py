@@ -5,6 +5,12 @@ import torch
 import deepdish as dd
 from datetime import datetime
 
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.utils.multiclass import unique_labels
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import pandas as pd 
 
 class SkipWith(Exception):
     pass
@@ -100,3 +106,29 @@ def save_trained_pytorch_model(trained_model,
             f.write(time_stamp + '\n')
 
     return None
+
+
+def plot_confusion_matrix(y_true, y_pred, classes,
+                          normalize=False,
+                          title=None,
+                          cmap="YlGnBu"):
+    """
+    This function prints and plots the confusion matrix.
+    Normalization can be applied by setting `normalize=True`.
+    """
+    sns.set()
+
+    # Compute confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+
+    ax = sns.heatmap(cm, fmt = 'd' , cmap=cmap, cbar = False,  annot=True)
+
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.title('Confusion Matrix')
+
+    plt.xticks(0.5 + np.arange(len(classes)), classes)
+    plt.yticks(0.5 + np.arange(len(classes)), classes)
+
+    plt.tight_layout()
+    return ax

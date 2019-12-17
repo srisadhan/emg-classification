@@ -67,10 +67,10 @@ def extract_emg_features(config, sort_channels):
         labels     = data['subject_'+subject]['labels']
 
         # coverting one hot encoding back to class labels
-        if config['n_class'] == 3:
-            labels     = np.sum( np.multiply(np.array([1,2,3],ndmin=2) , labels) , axis=1)
-        elif config['n_class'] == 4:
-            labels     = np.sum( np.multiply(np.array([1,2,3,4],ndmin=2) , labels) , axis=1)
+        # if config['n_class'] == 3:
+        labels     = np.sum( np.multiply(np.array(np.arange(1, config['n_class']+1),ndmin=2) , labels) , axis=1)
+        # elif config['n_class'] == 4:
+        #     labels     = np.sum( np.multiply(np.array([1,2,3,4],ndmin=2) , labels) , axis=1)
 
         # A 3d array with dimensions representing trial_samples x emg_channels x epochs
         data_shape = emg_vec.shape
