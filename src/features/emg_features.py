@@ -58,8 +58,12 @@ def extract_emg_features(config, sort_channels):
 
     Data = collections.defaultdict(dict)
     # load the data from the path
-    path = str(Path(__file__).parents[2] / config['clean_emg_data'])
-    data = dd.io.load(path)
+    if config['n_class'] == 3:
+        save_path = Path(__file__).parents[2] / config['clean_emg_data_3class']
+    elif config['n_class'] == 4:
+        save_path = Path(__file__).parents[2] / config['clean_emg_data_4class']
+        
+    data = dd.io.load(str(save_path))
 
     for subject in config['subjects']:
 

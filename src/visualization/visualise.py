@@ -146,3 +146,21 @@ def plot_bar(config, dataframe, independent, dependent):
     ax.set_xlabel('task type information')
 
     return None
+
+
+def plot_UMAP_embeddings(X_embedded, y):
+    """Plots the average accuracy of the pytorch model prediction.
+
+    Parameters
+    ----------
+    X_embedded: nd-array
+        features projected on to the latent space
+    y: numpy array
+        True labels of the embedded data 
+
+    """
+    # dimension of the projected space
+    dimension = X_embedded.shape[1]
+
+    if (dimension.astype(int) >= 2.0):
+        print(dimension)

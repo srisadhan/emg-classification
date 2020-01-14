@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import deepdish as dd
 import sys
+import math
 
 def get_trial_path(subject, trial, config, robot=False):
     """Get the trail path for a given subject and trial.
@@ -292,54 +293,57 @@ def get_raw_emg_exp2(subject, trial, config):
     # path of the EMG file
     filepath = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial
 
-    for file in filepath.iterdir():
-        if (file.name.split('.')[0] == 'EMG'):
-            # Get the time from EMG.csv
-            time = np.genfromtxt(file,
-                                dtype=None,
-                                delimiter=',',
-                                unpack=True,
-                                skip_footer=config['skip_footer'],
-                                skip_header=config['skip_header'],
-                                usecols=0,
-                                encoding=None)
-            # Get the EMG data
-            EMG_data = np.genfromtxt(file,
-                                dtype=float,
-                                delimiter=',',
-                                unpack=True,
-                                skip_footer=config['skip_footer'],
-                                skip_header=config['skip_header'],
-                                usecols=np.arange(1,9),
-                                encoding=None)
-            
-            # get the actual trial start and end time based on the PB and MYO data
-            if subject in config['subjects2']:
-                trial_start, trial_end, _ = get_trial_time_exp2(subject, trial, PB_path, EMG_path, config)
-            else:
-                trial_start, trial_end, _ = get_trial_time(subject, trial, config)
+    if filepath.exists():
+        for file in filepath.iterdir():
+            if (file.name.split('.')[0] == 'EMG'):
+                # Get the time from EMG.csv
+                time = np.genfromtxt(file,
+                                    dtype=None,
+                                    delimiter=',',
+                                    unpack=True,
+                                    skip_footer=config['skip_footer'],
+                                    skip_header=config['skip_header'],
+                                    usecols=0,
+                                    encoding=None)
+                # Get the EMG data
+                EMG_data = np.genfromtxt(file,
+                                    dtype=float,
+                                    delimiter=',',
+                                    unpack=True,
+                                    skip_footer=config['skip_footer'],
+                                    skip_header=config['skip_header'],
+                                    usecols=np.arange(1,9),
+                                    encoding=None)
+                
+                # get the actual trial start and end time based on the PB and MYO data
+                if subject in config['subjects2']:
+                    trial_start, trial_end, _ = get_trial_time_exp2(subject, trial, PB_path, EMG_path, config)
+                else:
+                    trial_start, trial_end, _ = get_trial_time(subject, trial, config)
 
-            time_EMG, sfreq = convert_time(time)
+                time_EMG, sfreq = convert_time(time)
 
-            indices = np.all([time_EMG >= trial_start, time_EMG <= trial_end], axis=0)
-            
-            time_EMG = time_EMG[indices[:,0]]
-            EMG_data = EMG_data[:, indices[:,0]]
+                indices = np.all([time_EMG >= trial_start, time_EMG <= trial_end], axis=0)
+                
+                time_EMG = time_EMG[indices[:,0]]
+                EMG_data = EMG_data[:, indices[:,0]]
 
-            # Create mne raw object
-            info = mne.create_info(ch_names=[
-                'emg_1', 'emg_2', 'emg_3', 'emg_4', 'emg_5', 'emg_6', 'emg_7', 'emg_8'
-            ],
-                                ch_types=['misc'] * EMG_data.shape[0],
-                                sfreq=sfreq)
+                # Create mne raw object
+                info = mne.create_info(ch_names=[
+                    'emg_1', 'emg_2', 'emg_3', 'emg_4', 'emg_5', 'emg_6', 'emg_7', 'emg_8'
+                ],
+                                    ch_types=['misc'] * EMG_data.shape[0],
+                                    sfreq=sfreq)
 
-            # Create mne raw file
-            raw = mne.io.RawArray(EMG_data, info, verbose=False)
+                # Create mne raw file
+                raw = mne.io.RawArray(EMG_data, info, verbose=False)
 
-            # Additional information
-            raw.info['subject_info'] = subject
+                # Additional information
+                raw.info['subject_info'] = subject
 
-            return raw, [trial_start[:], trial_end[:]]
+                return raw, [trial_start[:], trial_end[:]]
+    else:
+        return [], []
 
 
 def create_emg_data(subjects, trials, config):
@@ -370,9 +374,10 @@ def create_emg_data(subjects, trials, config):
             else:
                 raw_data, trial_time = get_raw_emg(subject, trial, config)
                 
+            if raw_data :
+                data['EMG'][trial] = raw_data
+                data['time'][trial] = trial_time
 
-            data['EMG'][trial] = raw_data
-            data['time'][trial] = trial_time
         emg_data['subject_' + subject] = data
     
     return emg_data
@@ -419,7 +424,7 @@ def get_emg_epoch(subject,raw_emg, time, config):
     return epochs
 
 
-def create_emg_epoch(subjects, trials, config):
+def create_emg_epoch(subjects, trials, read_path, config):
     """Create the data with each subject data in a dictionary.
 
     Parameter
@@ -428,6 +433,8 @@ def create_emg_epoch(subjects, trials, config):
         String of subject ID e.g. 7707
     error_type : list
         Types of trials i.e., e.g. HighFine.
+    read_path : string
+        path of the saved file
     config : yaml
         The configuration file
 
@@ -442,19 +449,29 @@ def create_emg_epoch(subjects, trials, config):
     emg_epochs = {}
 
     # Load the data
-    read_path = Path(__file__).parents[2] / config['raw_emg_data']
+    # read_path = Path(__file__).parents[2] / config['raw_emg_data']
     data = dd.io.load(str(read_path))
 
     # Loop over all subjects and error types
     for subject in subjects:
         temp = collections.defaultdict(dict)
-        for trial in trials:
-            raw_emg = data['subject_' + subject]['EMG'][trial]
-            time = data['subject_' + subject]['time'][trial]
 
-            # Create epoch data
-            temp['EMG'][trial] = get_emg_epoch(subject,raw_emg, time, config)
-            temp['time'][trial] = time
+        if subject in config['test_subjects']:
+            for trial in config['comb_trials']:
+                raw_emg = data['subject_' + subject]['EMG'][trial]
+                time = data['subject_' + subject]['time'][trial]
+
+                # Create epoch data
+                temp['EMG'][trial] = get_emg_epoch(subject,raw_emg, time, config)
+                temp['time'][trial] = time
+        else:
+            for trial in ['HighFine', 'LowGross', 'HighGross', 'LowFine']:
+                raw_emg = data['subject_' + subject]['EMG'][trial]
+                time = data['subject_' + subject]['time'][trial]
+
+                # Create epoch data
+                temp['EMG'][trial] = get_emg_epoch(subject,raw_emg, time, config)
+                temp['time'][trial] = time
 
         emg_epochs['subject_' + subject] = temp
 
@@ -616,15 +633,16 @@ def get_PB_data(subject, trial, config):
         PB_path  = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'PB.csv'
         EMG_path = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'EMG.csv'
     else:
-        PB_path  = get_trial_path(subject, trial, config, robot=True)
-        EMG_path = get_trial_path(subject, trial, config)
-
+        if trial not in config['comb_trials']:
+            PB_path  = get_trial_path(subject, trial, config, robot=True)
+            EMG_path = get_trial_path(subject, trial, config)
+    
     # read the data
     PB_data = np.genfromtxt(PB_path,
                             dtype=float,
                             delimiter=',',
                             unpack=True,
-                            usecols=[13, 14, 19, 20],
+                            usecols=[16, 17, 19, 20], # [13, 14]-Fx,Fy; [16,17]-Mx,My
                             skip_footer=config['skip_footer'],
                             skip_header=config['skip_header'])
     time_data = np.genfromtxt(PB_path,
@@ -634,6 +652,12 @@ def get_PB_data(subject, trial, config):
                             usecols=0,
                             skip_footer=config['skip_footer'],
                             skip_header=config['skip_header'])
+
+    # Moments are used in Amir's experiment. The moment to force conversion scalar provided in the experiment are [-10.0,-10.0]
+    PB_data[0:2,:] = np.multiply(PB_data[0:2,:], np.array([-10, 10]).reshape(2,1)) # only when 16, 17 are used instead of 13, 14
+
+    # Calculate the forces in the tangential and the normal directions
+    PB_data = tangential_normal_force_components(PB_data)
 
     # get the actual trial start and end time based on the PB and MYO data
     if subject in config['subjects2']:
@@ -651,7 +675,7 @@ def get_PB_data(subject, trial, config):
     
     
     # creating an mne object
-    info = mne.create_info(ch_names=['Fx', 'Fy', 'X', 'Y'], sfreq=sfreq, ch_types=['misc'] * 4)
+    info = mne.create_info(ch_names=['Fx', 'Fy', 'X', 'Y', 'Ft', 'Fn'], sfreq=sfreq, ch_types=['misc'] * 6)
     raw = mne.io.RawArray(PB_data, info, verbose=False)
 
     return raw, time_data
@@ -673,18 +697,25 @@ def create_PB_data(subjects, trials, config):
     ----------
     dict
         A data (dict) of all the subjects with different conditions
-
+        data['PB'] = Fx, Fy, X, Y, Ft, Fn
     """
     PB_data = {}
     # Loop over all subjects and error types
     for subject in subjects:
         data = collections.defaultdict(dict)
 
-        for trial in trials:
-            raw_data, time = get_PB_data(subject, trial, config)             
+        if subject not in config['test_subjects']:
+            for trial in trials:
+                if trial not in config['comb_trials']:
+                    raw_data, time = get_PB_data(subject, trial, config)   
+                    data['PB'][trial] = raw_data
+                    data['time'][trial] = time
+        else:
+            for trial in config['comb_trials']:
+                raw_data, time = get_PB_data(subject, trial, config)   
+                data['PB'][trial] = raw_data
+                data['time'][trial] = time
 
-            data['PB'][trial] = raw_data
-            data['time'][trial] = time
 
         PB_data['subject_' + subject] = data
         
@@ -755,16 +786,95 @@ def create_PB_epoch(subjects, trials, config):
     # Loop over all subjects and error types
     for subject in subjects:
         temp = collections.defaultdict(dict)
-        for trial in trials:
-            raw_data = data['subject_' + subject]['PB'][trial]
-            time = data['subject_' + subject]['time'][trial]
 
-            # Create epoch data
-            temp['PB'][trial] = get_PB_epoch(subject, raw_data, config)
-            temp['time'][trial] = time
+        if subject not in config['test_subjects']:
+            for trial in trials:
+                if trial not in config['comb_trials']:
+                    raw_data = data['subject_' + subject]['PB'][trial]
+                    time = data['subject_' + subject]['time'][trial]
+
+                    # Create epoch data
+                    temp['PB'][trial] = get_PB_epoch(subject, raw_data, config)
+                    temp['time'][trial] = time
+        else:
+            for trial in config['comb_trials']:
+                raw_data = data['subject_' + subject]['PB'][trial]
+                time = data['subject_' + subject]['time'][trial]
+
+                # Create epoch data
+                temp['PB'][trial] = get_PB_epoch(subject, raw_data, config)
+                temp['time'][trial] = time
 
         data_epochs['subject_' + subject] = temp
 
     return data_epochs
 
 
+def tangential_normal_force_components(data):
+    """Calculates the tangential and the normal components of the force
+
+    Arguments:
+        data {ndarray} -- a 4-dimensional array consisting of Fx, Fy, X, Y as rows
+
+    Returns:
+        data {ndarray} -- a 6-dimensional array consisting of Fx, Fy, X, Y, Ft, Fn as rows
+    """
+    force_xy    = data[0:2,:]
+    pos_xy      = data[2:4,:]
+
+    for i in range(2, pos_xy.shape[0]-2):
+        pos_xy[i,0] = np.ma.average(pos_xy[i-2:i+3, 0])
+        pos_xy[i,1] = np.ma.average(pos_xy[i-2:i+3, 1])
+        
+    # i dont think fitting a polynomial and finding tangent is appropriate
+    # for i in range(2, pos.shape[0]-2):
+    #     p       = np.polyfit(pos[i-2:2:i+3,0], pos[i-2:2:i+3,1], 3)
+    #     ptan    = 3 * p[0] * pos[i,0]**2 + 2 * p[1] * pos[i,0] + p[2]
+        
+    #     tang_angle  = math.atan2(ptan, pos[i,0])
+    #     force_angle = math.atan2(force_xy[i,1], force_xy[i,0])
+
+    pos_diff    = np.diff(pos_xy, axis=1)
+    force_t     = np.zeros((1,force_xy.shape[1]))
+    force_n     = np.zeros((1,force_xy.shape[1]))
+
+    for i in range(1,force_xy.shape[1]):
+        mag = np.linalg.norm(force_xy[:,i])
+        ang = angle_between(pos_diff[:,i-1], force_xy[:,i])
+        
+        force_t[0,i]    = mag * math.cos(ang) 
+        force_n[0,i]    = mag * math.sin(ang) 
+    
+    return(np.concatenate((data[:,:], force_t, force_n), axis=0))
+
+
+def unit_vector(vector):
+    """ Returns the unit vector of the vector.  """
+    vec_norm = np.linalg.norm(vector)
+
+    if vec_norm == 0:
+        return vector * 0
+    else:
+        return vector / np.linalg.norm(vector)
+
+
+def angle_between(v1, v2):
+    """Returns the angle in radians between vectors 'v1' and 'v2'::
+
+            >>> angle_between((1, 0, 0), (0, 1, 0))
+            1.5707963267948966
+            >>> angle_between((1, 0, 0), (1, 0, 0))
+            0.0
+            >>> angle_between((1, 0, 0), (-1, 0, 0))
+            3.141592653589793
+    
+    Arguments:
+        v1 {numpy array} -- a 1d array
+        v2 {numpy array} -- a 1d array
+    
+    Returns:
+        [type] -- [description]
+    """ 
+    v1_u = unit_vector(v1)
+    v2_u = unit_vector(v2)
+    return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))

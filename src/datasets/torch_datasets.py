@@ -83,7 +83,11 @@ def subject_pooled_EMG_data(config):
 
     """
 
-    path = str(Path(__file__).parents[2] / config['clean_emg_data'])
+    if config['n_class'] == 3:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
+    elif config['n_class'] == 4:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+        
     data = dd.io.load(path)
 
     # Parameters

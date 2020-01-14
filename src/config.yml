@@ -2,7 +2,7 @@
 epoch_length:         1
 n_freqs:              6
 n_electrodes:         8
-n_class:              4
+n_class:              3
 freq_bands:           [[4, 7], [8, 10], [11, 13], [14, 22], [23, 35], [35, 45]]
 Fs:                   200
 sfreq:                200
@@ -21,17 +21,20 @@ TEST_SIZE:            0.15
 DROP_OUT:             0.10
 
 ##---------------------------------------------------------------------##
-subject_count     : 12 # number of subjects
-features          : ['RMS', 'TD', 'HIST', 'mDWT']
+# Conventional EMG feature parameters
+subject_count     :   12 # number of subjects
+features          :   ['RMS', 'TD', 'HIST', 'mDWT']
 
 ##---------------------------------------------------------------------##
-# Experiment 0
-# All subjects are used for training and testing
-subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820','8821','8822', '8823', '8824', '9001_1', '9002_1', '9003_1', '9004_1', '9006_1', '9007_1', '9003_2', '9005_2']
-subjects2:            ['9001_1', '9002_1', '9003_1', '9004_1', '9005_2', '9006_1', '9007_1', '9003_2']
-subjectTest:          ['9003_2', '9005_2']
-test_subjects:        []
-trials:               ['HighFine', 'LowGross', 'HighGross', 'LowFine']
+# Task parameters
+comb_task_pos_limits: [0.075, 0.125]
+pool_comb_task_data : True # pool the combined task into rest of the data for classification
+##---------------------------------------------------------------------##
+subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820','8821','8822', '8823', '8824', '9001_1', '9002_1', '9003_1', '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9003_2', '9005_2', '9006_2', '9007_2', '9011_2']
+subjects2:            ['9001_1', '9002_1', '9003_1', '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9003_2', '9005_2', '9006_2', '9007_2', '9011_2']
+test_subjects:        ['9003_2', '9005_2', '9006_2', '9007_2', '9011_2']
+trials:               ['HighFine', 'LowGross', 'HighGross', 'LowFine', 'HighComb', 'LowComb']
+comb_trials:          ['HighComb', 'LowComb']
 skip_header:          2000
 skip_footer:          200
 
@@ -44,8 +47,10 @@ raw_PB_data:                  'data/interim/raw_force_exp_0_dataset.h5'
 raw_pooled_emg_data:          'data/interim/raw_pooled_emg_exp_0_dataset.h5'
 epoch_emg_data:               'data/processed/epoch_emg_exp_0_dataset.h5'
 epoch_PB_data:                'data/processed/epoch_force_exp_0_dataset.h5'
-clean_emg_data:               'data/processed/clean_emg_exp_0_dataset.h5'
-clean_PB_data:                'data/processed/clean_force_exp_0_dataset.h5'
+clean_emg_data_3class:        'data/processed/clean_emg_3class_dataset.h5'
+clean_emg_data_4class:        'data/processed/clean_emg_4class_dataset.h5'
+clean_PB_data_3class:         'data/processed/clean_force_3class_dataset.h5'
+clean_PB_data_4class:         'data/processed/clean_force_4class_dataset.h5'
 clean_emg_pb_data:            'data/processed/clean_force_pos_emg_exp_0_dataset.h5' 
 torch_dataset:                'data/processed/torch_exp_0_dataset.h5'
 statistics_dataframe:         'data/processed/statistics_exp_0_dataset.h5'

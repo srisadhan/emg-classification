@@ -6,7 +6,8 @@ import random
 
 from imblearn.under_sampling import RandomUnderSampler
 from sklearn.model_selection import train_test_split
-
+import sys
+import matplotlib.pyplot as plt
 
 def train_test_data(features, labels, leave_tags, config):
     """Short summary.
@@ -127,9 +128,6 @@ def subject_pooled_EMG_PB_data(subjects, path, config):
     # path = str(Path(__file__).parents[2] / config['clean_emg_data'])
     data = dd.io.load(path)
 
-    # Subject information
-    subjects = config['subjects']
-
     # Empty array (list)
     emg = []
     pb = []
@@ -148,8 +146,8 @@ def subject_pooled_EMG_PB_data(subjects, path, config):
 
     # Convert to array
     emg = np.concatenate(emg, axis=0)
-    pb = np.concatenate(pb, axis=0)
-    y  = np.concatenate(y, axis=0)
+    pb  = np.concatenate(pb, axis=0)
+    y   = np.concatenate(y, axis=0)
     
     return emg, pb, y
 
@@ -167,7 +165,7 @@ def subject_pooled_EMG_PB_data(subjects, path, config):
     # return features_emg, pos, labels
 
 
-def subject_dependent_data(config):
+def subject_dependent_data(path, config):
     """Get subject dependent data.
 
     Parameters
@@ -182,7 +180,7 @@ def subject_dependent_data(config):
 
     """
 
-    path = str(Path(__file__).parents[2] / config['clean_emg_data'])
+    # path = str(Path(__file__).parents[2] / config['clean_emg_data'])
     data = dd.io.load(path)
 
     # Parameters
@@ -218,7 +216,7 @@ def subject_dependent_data(config):
     return features, labels, tags
 
 
-def subject_specific_data(subject, config):
+def subject_specific_data(subject, path, config):
     """Get subject specific data.
 
     Parameters
@@ -233,7 +231,7 @@ def subject_specific_data(subject, config):
 
     """
 
-    path = str(Path(__file__).parents[2] / config['clean_emg_data'])
+    # path = str(Path(__file__).parents[2] / config['clean_emg_data'])
     data = dd.io.load(path)
 
     # Get the data
@@ -278,8 +276,16 @@ def split_pooled_EMG_PB_data_train_test(subjects, path, config):
     testing_data = {}
 
     # pool the data
-    features_emg, pos, labels = subject_pooled_EMG_PB_data(subjects, path, config)
+    features_emg, pb, labels = subject_pooled_EMG_PB_data(subjects, path, config)
     # print("Total pooled data: %f" %(labels.shape[0]))
+
+    pos = pb[:,2:4,:].mean(axis=2)
+
+    # plt.figure()
+    # plt.plot(pos[:,0],pos[:,1],'r.')
+    # plt.show()
+    # print(pb.shape, pos.shape)
+    # sys.exit()
 
     # split the shuffled data for training and testing
     indices = np.arange(0, labels.shape[0], dtype=int)
