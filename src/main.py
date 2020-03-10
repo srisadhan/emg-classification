@@ -13,6 +13,10 @@ from pathlib import Path
 
 from pyriemann.estimation import Covariances, Shrinkage, Coherences
 from pyriemann.tangentspace import TangentSpace, FGDA
+from pyriemann.utils.distance import distance
+from pyriemann.utils.mean import mean_riemann
+from pyriemann.classification import MDM
+from pyriemann.channelselection import ElectrodeSelection
 # from pyriemann.utils.viz import plot_confusion_matrix
 
 from pathlib import Path
@@ -629,7 +633,7 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
     print("Inter-subject tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
-with skip_run('run', 'inter_session_transferability_using_riemannian_features') as check, check():
+with skip_run('skip', 'inter_session_transferability_using_riemannian_features') as check, check():
     # Subject information
     subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
     subjects_test = config['test_subjects']
@@ -997,4 +1001,63 @@ with skip_run('skip', 'classify_task_riemann_features') as check, check():
     print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
 
     accuracy = cross_val_score(clf2, ts, y.ravel(), cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+
+
+## -----------------files to test concepts-------------------##
+with skip_run('run', 'distance_between_mean_of_covariance_matrix_emg') as check, check():
+    # Subject information
+    subjects = config['subjects']
+    if config['n_class'] == 3:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
+    elif config['n_class'] == 4:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
+
+    X   = features
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+
+    #TODO: Error here - channel selection doesn't work 
+    # input should be class-conditional mean matrices of each class. what I'm doing is wrong below. Segregate into classes
+    mean_cov = mean_riemann(covest)
+    print(mean_cov.shape, type(mean_cov))
+    sys.exit()
+    selecElecs = ElectrodeSelection(nelec=4)
+    # selecElecs.
+    # print(ts.shape)
+    # sys.exit()
+
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+        
+
+    # Singular Value Decomposition of covest
+    # V = np.zeros((covest.shape[0], covest.shape[1] * covest.shape[2]))
+    # for i in range(0, covest.shape[0]):
+    #     _, _, v = np.linalg.svd(covest[i])
+    #     V[i,:] = np.ravel(v, order ='F')
+
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    # Minimum distance to mean classifier
+    clf3 = MDM()
+
+
+    accuracy = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf3, covest, y, cv=KFold(5,shuffle=True))
     print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
