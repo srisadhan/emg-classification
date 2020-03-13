@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pyriemann.estimation import Covariances, Shrinkage, Coherences
 from pyriemann.tangentspace import TangentSpace, FGDA
-from pyriemann.utils.distance import distance
+from pyriemann.utils.distance import distance, distance_riemann
 from pyriemann.utils.mean import mean_riemann
 from pyriemann.classification import MDM
 from pyriemann.channelselection import ElectrodeSelection
@@ -1006,13 +1006,14 @@ with skip_run('skip', 'classify_task_riemann_features') as check, check():
 
 
 ## -----------------files to test concepts-------------------##
-with skip_run('run', 'distance_between_mean_of_covariance_matrix_emg') as check, check():
+with skip_run('skip', 'accuracy_after_channel_selection') as check, check():
     # Subject information
     subjects = config['subjects']
     if config['n_class'] == 3:
         save_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
     elif config['n_class'] == 4:
         save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+    
     # Load main data
     features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
 
@@ -1021,30 +1022,19 @@ with skip_run('run', 'distance_between_mean_of_covariance_matrix_emg') as check,
     print(X.shape)
     print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
 
+    # calculate the mean covariance matrix of each class
+    mean_cov    = np.zeros((config['n_class'], config['n_electrodes'], config['n_electrodes']))
+    
+    for category in range(config['n_class']):
+        covest                  = Covariances().fit_transform(X[y==category+1,:,:])
+        mean_cov[category,:,:]  = mean_riemann(covest)
+
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
-
-    #TODO: Error here - channel selection doesn't work 
-    # input should be class-conditional mean matrices of each class. what I'm doing is wrong below. Segregate into classes
-    mean_cov = mean_riemann(covest)
-    print(mean_cov.shape, type(mean_cov))
-    sys.exit()
-    selecElecs = ElectrodeSelection(nelec=4)
-    # selecElecs.
-    # print(ts.shape)
-    # sys.exit()
 
     # project the covariance into the tangent space
     ts = TangentSpace().fit_transform(covest)
         
-
-    # Singular Value Decomposition of covest
-    # V = np.zeros((covest.shape[0], covest.shape[1] * covest.shape[2]))
-    # for i in range(0, covest.shape[0]):
-    #     _, _, v = np.linalg.svd(covest[i])
-    #     V[i,:] = np.ravel(v, order ='F')
-
-
     # SVM classifier
     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
     # Random forest classifier
@@ -1052,12 +1042,112 @@ with skip_run('run', 'distance_between_mean_of_covariance_matrix_emg') as check,
     # Minimum distance to mean classifier
     clf3 = MDM()
 
+    accuracy_svm = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy_svm.mean(), accuracy_svm.std() * 2))
+    
+    accuracy_rf  = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy_rf.mean(), accuracy_rf.std() * 2))
 
-    accuracy = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
-    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+    accuracy_mdm = cross_val_score(clf3, covest, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Minimum distance to mean (MDM): %0.4f (+/- %0.4f)" % (accuracy_mdm.mean(), accuracy_mdm.std() * 2))
 
-    accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
-    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
 
-    accuracy = cross_val_score(clf3, covest, y, cv=KFold(5,shuffle=True))
-    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+with skip_run('skip', 'accuracy_after_channel_selection') as check, check():
+    # Subject information
+    subjects = config['subjects']
+    if config['n_class'] == 3:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
+    elif config['n_class'] == 4:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+    
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
+
+    X   = features
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+
+    # calculate the mean covariance matrix of each class
+    # mean_cov    = np.zeros((config['n_class'], config['n_electrodes'], config['n_electrodes']))
+    
+    # for category in range(config['n_class']):
+    #     covest                  = Covariances().fit_transform(X[y==category+1,:,:])
+    #     mean_cov[category,:,:]  = mean_riemann(covest)
+
+    # ind_list = [[0,1], [1,2], [2,0]]
+    # for ind in ind_list:
+    #     print(distance_riemann(mean_cov[ind[0],:,:], mean_cov[ind[1],:,:]))
+
+    accuracies_dict = collections.defaultdict()
+
+    for nelec in range(2, config['n_electrodes']+1):
+        data = collections.defaultdict()
+
+        # estimation of the covariance matrix
+        covest = Covariances().fit_transform(X)
+
+        # Remove the channels using the channel selection algorithm
+        if nelec < config['n_electrodes']:
+            selecElecs = ElectrodeSelection(nelec=nelec)
+            mean_cov = selecElecs.fit(covest, y)
+            covest = mean_cov.transform(covest)
+            print(covest.shape)
+
+        # project the covariance into the tangent space
+        ts = TangentSpace().fit_transform(covest)
+            
+        # SVM classifier
+        clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+        # Random forest classifier
+        clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+        # Minimum distance to mean classifier
+        clf3 = MDM()
+
+
+        accuracy_svm = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+        print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy_svm.mean(), accuracy_svm.std() * 2))
+        
+        accuracy_rf  = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+        print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy_rf.mean(), accuracy_rf.std() * 2))
+
+        accuracy_mdm = cross_val_score(clf3, covest, y, cv=KFold(5,shuffle=True))
+        print("cross validation accuracy using Minimum distance to mean (MDM): %0.4f (+/- %0.4f)" % (accuracy_mdm.mean(), accuracy_mdm.std() * 2))
+
+        data['SVM'] = accuracy_svm 
+        data['RF']  = accuracy_rf
+        data['MDM'] = accuracy_mdm
+
+        accuracies_dict[nelec] = data
+
+    # save the accuracies of the classifiers after removing channels 
+    path = str(Path(__file__).parents[1] / config['accuracies_channel_selection'])
+    dd.io.save(path, accuracies_dict)
+
+with skip_run('skip', 'plot_errorbar_for_accuracies_after_channel_selection') as check, check():
+
+    #load the accuracies file
+    path = str(Path(__file__).parents[1] / config['accuracies_channel_selection'])
+    accuracies_dict = dd.io.load(path)
+
+    # plot the accuracies
+    plt.figure()
+
+    for nelec in range(2, config['n_electrodes']+1):
+        accuracy_svm = accuracies_dict[nelec]['SVM']
+        accuracy_rf  = accuracies_dict[nelec]['RF']
+        accuracy_mdm = accuracies_dict[nelec]['MDM']
+
+        plt.errorbar(nelec, accuracy_svm.mean(), 2 * accuracy_svm.std(), ecolor='r')
+        plt.errorbar(nelec, accuracy_rf.mean(),  2 * accuracy_rf .std(),  ecolor='b')
+        plt.errorbar(nelec, accuracy_mdm.mean(), 2 * accuracy_mdm.std(), ecolor='k')
+    
+    n_elecs = np.arange(2,config['n_electrodes']+1)
+
+
+    plt.xlabel('Number of electrodes used')
+    plt.ylabel('Accuracy')
+
+    # plt.legend()
+    plt.show()

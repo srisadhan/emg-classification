@@ -135,3 +135,8 @@ def xdawn_embedding(data):
     embd = lapl.fit_transform(covs)
 
     return embd
+
+
+# def channel_selection():
+
+

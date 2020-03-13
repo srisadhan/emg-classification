@@ -65,4 +65,5 @@ save_h5_file      :           '../data/processed/time_frequency_EMG_features.h5'
 pooled_riemannian_features:   'data/processed/pooled_riemannian_features.h5'
 split_pooled_EMG_PB_data :    'data/processed/split_pooled_EMG_PB_data.h5'
 true_and_predicted_labels:    'data/processed/true_and_predicted_labels.h5'
+accuracies_channel_selection: 'data/processed/accuracies_channel_selection.h5'
 ##---------------------------------------------------------------------##
