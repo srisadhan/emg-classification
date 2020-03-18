@@ -1006,7 +1006,7 @@ with skip_run('skip', 'classify_task_riemann_features') as check, check():
 
 
 ## -----------------files to test concepts-------------------##
-with skip_run('skip', 'accuracy_after_channel_selection') as check, check():
+with skip_run('run', 'calculate_distance_features_using_mean_covariance') as check, check():
     # Subject information
     subjects = config['subjects']
     if config['n_class'] == 3:
@@ -1023,18 +1023,25 @@ with skip_run('skip', 'accuracy_after_channel_selection') as check, check():
     print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
 
     # calculate the mean covariance matrix of each class
-    mean_cov    = np.zeros((config['n_class'], config['n_electrodes'], config['n_electrodes']))
+    class_mean_cov    = np.zeros((config['n_class'], config['n_electrodes'], config['n_electrodes']))
     
     for category in range(config['n_class']):
-        covest                  = Covariances().fit_transform(X[y==category+1,:,:])
-        mean_cov[category,:,:]  = mean_riemann(covest)
-
+        # pick all the covariances matrices that belong to corresponding class "category+1"
+        covest                          = Covariances().fit_transform(X[y == category + 1, :, :])
+        class_mean_cov[category,:,:]    = mean_riemann(covest)
+    
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
 
+    cov_dist_feats = np.zeros((X.shape[0], 3))
+    for i in range(X.shape[0]):
+        for category in range(config['n_class']):
+            cov_dist_feats[i, category] = distance_riemann(covest[i, :, :], class_mean_cov[category,:,:])
+
+
     # project the covariance into the tangent space
     ts = TangentSpace().fit_transform(covest)
-        
+
     # SVM classifier
     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
     # Random forest classifier
@@ -1051,8 +1058,27 @@ with skip_run('skip', 'accuracy_after_channel_selection') as check, check():
     accuracy_mdm = cross_val_score(clf3, covest, y, cv=KFold(5,shuffle=True))
     print("cross validation accuracy using Minimum distance to mean (MDM): %0.4f (+/- %0.4f)" % (accuracy_mdm.mean(), accuracy_mdm.std() * 2))
 
+    # concatenate the cov_distance features with the tangent space features
+    ts = np.concatenate((ts, cov_dist_feats), axis=1)   
 
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    # Minimum distance to mean classifier
+    clf3 = MDM()
 
+    accuracy_svm = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy_svm.mean(), accuracy_svm.std() * 2))
+    
+    accuracy_rf  = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy_rf.mean(), accuracy_rf.std() * 2))
+
+    accuracy_mdm = cross_val_score(clf3, covest, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Minimum distance to mean (MDM): %0.4f (+/- %0.4f)" % (accuracy_mdm.mean(), accuracy_mdm.std() * 2))
+    
+
+#TODO: The channel selection has to be performed subject wise.
 with skip_run('skip', 'accuracy_after_channel_selection') as check, check():
     # Subject information
     subjects = config['subjects']
@@ -1131,23 +1157,36 @@ with skip_run('skip', 'plot_errorbar_for_accuracies_after_channel_selection') as
     path = str(Path(__file__).parents[1] / config['accuracies_channel_selection'])
     accuracies_dict = dd.io.load(path)
 
+    Nelecs       = np.arange(2, config['n_electrodes']+1)
+    
+    accuracy_svm = np.zeros((len(Nelecs),2))
+    accuracy_rf  = np.zeros((len(Nelecs),2))
+    accuracy_mdm = np.zeros((len(Nelecs),2))
     # plot the accuracies
     plt.figure()
+    i = 0
+    while i < len(Nelecs):
+        svm = accuracies_dict[Nelecs[i]]['SVM']
+        rf  = accuracies_dict[Nelecs[i]]['RF']
+        mdm = accuracies_dict[Nelecs[i]]['MDM']
 
-    for nelec in range(2, config['n_electrodes']+1):
-        accuracy_svm = accuracies_dict[nelec]['SVM']
-        accuracy_rf  = accuracies_dict[nelec]['RF']
-        accuracy_mdm = accuracies_dict[nelec]['MDM']
+        plt.errorbar(Nelecs[i], svm.mean(), 2 * svm.std(), ecolor='r')
+        plt.errorbar(Nelecs[i], rf.mean(),  2 * rf.std(),  ecolor='b')
+        plt.errorbar(Nelecs[i], mdm.mean(), 2 * mdm.std(), ecolor='k')
 
-        plt.errorbar(nelec, accuracy_svm.mean(), 2 * accuracy_svm.std(), ecolor='r')
-        plt.errorbar(nelec, accuracy_rf.mean(),  2 * accuracy_rf .std(),  ecolor='b')
-        plt.errorbar(nelec, accuracy_mdm.mean(), 2 * accuracy_mdm.std(), ecolor='k')
-    
-    n_elecs = np.arange(2,config['n_electrodes']+1)
+        accuracy_svm[i,:] = [svm.mean(), 2 * svm.std()] 
+        accuracy_rf [i,:] = [rf.mean(), 2 * rf.std()]
+        accuracy_mdm[i,:] = [mdm.mean(), 2 * mdm.std()]
+
+        i += 1
 
 
-    plt.xlabel('Number of electrodes used')
+    plt.plot(Nelecs, accuracy_svm[:,0], label = 'svm', color='r')
+    plt.plot(Nelecs, accuracy_rf[:,0], label = 'rf', color='b')
+    plt.plot(Nelecs, accuracy_mdm[:,0], label = 'mdm', color='k')
+
+    plt.xlabel('Remaining number of electrodes')
     plt.ylabel('Accuracy')
 
-    # plt.legend()
+    plt.legend()
     plt.show()
