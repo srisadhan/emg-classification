@@ -13,57 +13,80 @@ threshold:            1
 
 ##---------------------------------------------------------------------##
 # Neural network parameters
-OUTPUT:               3
-NUM_EPOCHS:           150
-BATCH_SIZE:           64
-LEARNING_RATE:        0.001
-TEST_SIZE:            0.15
-DROP_OUT:             0.10
+OUTPUT:                   3
+NUM_EPOCHS:               50 #150
+BATCH_SIZE:               64
+LEARNING_RATE:            0.001
+TEST_SIZE:                0.15
+DROP_OUT:                 0.10
+
+SELF_CORRECTION_NN:
+  WIN_LEN:                  10      # window length to consider the time history for correction algorithm
+  INPUTS :                  22      # number of inputs in the input layer
+  HIDDEN_UNITS :            8       # number of hidden layer units
+  OUTPUTS :                 3      # number of output units
 
 ##---------------------------------------------------------------------##
 # Conventional EMG feature parameters
 subject_count     :   12 # number of subjects
 features          :   ['RMS', 'TD', 'HIST', 'mDWT']
 
+# filter parameters
+high_pass_filter  : False
+filter_freq       : [25, 150]
 ##---------------------------------------------------------------------##
 # Task parameters
 comb_task_pos_limits: [0.075, 0.125]
-pool_comb_task_data : True # pool the combined task into rest of the data for classification
+pool_comb_task_data : False # pool the combined task into rest of the data for classification
+print_dist_between_mean_covs : True # print the distance between all possible class covariance matrices.
 ##---------------------------------------------------------------------##
-subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820','8821','8822', '8823', '8824', '9001_1', '9002_1', '9003_1', '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9003_2', '9005_2', '9006_2', '9007_2', '9011_2']
-subjects2:            ['9001_1', '9002_1', '9003_1', '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9003_2', '9005_2', '9006_2', '9007_2', '9011_2']
-test_subjects:        ['9003_2', '9005_2', '9006_2', '9007_2', '9011_2']
+# subjects : list of all the subjects (amir and my exp); subjects2 : list of subjects from my exp; test_subjects: list of subjects used for testing the classifier
+subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820', '8821', '8822', '8823', '8824', '9001_1', '9002_1', '9003_1', '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9002_2', '9003_2', '9005_2', '9006_2', '9007_2'] #, '9011_2']
+subjects2:            ['9001_1', '9002_1', '9003_1', '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9002_2', '9003_2', '9005_2', '9006_2', '9007_2'] #, '9011_2']
+test_subjects:        ['9002_2', '9003_2', '9005_2', '9006_2', '9007_2'] #, '9011_2']
 trials:               ['HighFine', 'LowGross', 'HighGross', 'LowFine', 'HighComb', 'LowComb']
 comb_trials:          ['HighComb', 'LowComb']
+test_all_trials:      False    # Test the accuracy of the classifier on all the 6 trails
+test_comb_trials:     False    # Test the accuracy of the classifier only on the comb trials
 skip_header:          2000
 skip_footer:          200
 
 # Path
-raw_emg_path:                 'data/raw/emg_data/'
-exp2_data_path:               'data/raw/exp2'
-force_data_path:              'data/raw/force_data/'
-raw_emg_data:                 'data/interim/raw_emg_exp_0_dataset.h5'
-raw_PB_data:                  'data/interim/raw_force_exp_0_dataset.h5'
-raw_pooled_emg_data:          'data/interim/raw_pooled_emg_exp_0_dataset.h5'
-epoch_emg_data:               'data/processed/epoch_emg_exp_0_dataset.h5'
-epoch_PB_data:                'data/processed/epoch_force_exp_0_dataset.h5'
-clean_emg_data_3class:        'data/processed/clean_emg_3class_dataset.h5'
-clean_emg_data_4class:        'data/processed/clean_emg_4class_dataset.h5'
-clean_PB_data_3class:         'data/processed/clean_force_3class_dataset.h5'
-clean_PB_data_4class:         'data/processed/clean_force_4class_dataset.h5'
-clean_emg_pb_data:            'data/processed/clean_force_pos_emg_exp_0_dataset.h5' 
-torch_dataset:                'data/processed/torch_exp_0_dataset.h5'
-statistics_dataframe:         'data/processed/statistics_exp_0_dataset.h5'
-matlab_dataframe:             'data/external/matlab_dataframe.csv'
-trained_model_path:           'models/experiment_0'
-subject_emg_features:         'data/processed/subject_emg_features_dataset.h5'
-pooled_emg_features:          'data/processed/pooled_emg_features_dataset.h5'
-emg_channel_order  :          'data/interim/raw_emg_channels_order_dataset.h5'
-ninapro_DB5_data   :          'data/processed/Ninapro/Features.mat'
-mat_file_loc      :           '../data/interim/Amir_data_' #50_features.mat'
-save_h5_file      :           '../data/processed/time_frequency_EMG_features.h5'
-pooled_riemannian_features:   'data/processed/pooled_riemannian_features.h5'
-split_pooled_EMG_PB_data :    'data/processed/split_pooled_EMG_PB_data.h5'
-true_and_predicted_labels:    'data/processed/true_and_predicted_labels.h5'
-accuracies_channel_selection: 'data/processed/accuracies_channel_selection.h5'
+raw_emg_path:                   'data/raw/emg_data/'
+exp2_data_path:                 'data/raw/exp2'
+force_data_path:                'data/raw/force_data/'
+raw_emg_data:                   'data/interim/raw_emg_exp_0_dataset.h5'
+raw_PB_data:                    'data/interim/raw_force_exp_0_dataset.h5'
+raw_pooled_emg_data:            'data/interim/raw_pooled_emg_exp_0_dataset.h5'
+epoch_emg_data:                 'data/processed/epoch_emg_exp_0_dataset.h5'
+epoch_PB_data:                  'data/processed/epoch_force_exp_0_dataset.h5'
+clean_emg_data_3class:          'data/processed/clean_emg_3class_dataset.h5'
+clean_emg_data_4class:          'data/processed/clean_emg_4class_dataset.h5'
+clean_PB_data_3class:           'data/processed/clean_force_3class_dataset.h5'
+clean_PB_data_4class:           'data/processed/clean_force_4class_dataset.h5'
+clean_emg_pb_data:              'data/processed/clean_force_pos_emg_exp_0_dataset.h5' 
+subject_data_pred_correction:   'data/processed/data_for_pred_correction.h5'
+torch_dataset:                  'data/processed/torch_exp_0_dataset.h5'
+statistics_dataframe:           'data/processed/statistics_exp_0_dataset.h5'
+matlab_dataframe:               'data/external/matlab_dataframe.csv'
+trained_model_path:             'models/experiment_0'
+corrNet_trained_model_path:     'models/experiment_0'
+subject_emg_features:           'data/processed/subject_emg_features_dataset.h5'
+pooled_emg_features:            'data/processed/pooled_emg_features_dataset.h5'
+emg_channel_order  :            'data/interim/raw_emg_channels_order_dataset.h5'
+ninapro_DB5_data   :            'data/processed/Ninapro/Features.mat'
+mat_file_loc      :             '../data/interim/Amir_data_' #50_features.mat'
+save_h5_file      :             '../data/processed/time_frequency_EMG_features.h5'
+pooled_riemannian_features:     'data/processed/pooled_riemannian_features.h5'
+split_pooled_EMG_PB_data :      'data/processed/split_pooled_EMG_PB_data.h5'
+true_and_predicted_labels:      'data/processed/true_and_predicted_labels.h5'
+accuracies_channel_selection:   'data/processed/accuracies_channel_selection.h5'
+dataset_fatigue_study1:         'data/processed/dataset1.h5'
+dataset_fatigue_study2:         'data/processed/dataset2.h5'
+epochs_for_Dr_Ehsan:            'data/processed/data_epochs.mat'
+covariance_for_Dr_Ehsan:        'data/processed/EMG_covariance.mat'
+tangent_feat_for_Dr_Ehsan:      'data/processed/EMG_features.mat'
+tangent_feat_for_Joe:           'data/processed/Riemannian_EMG_features.h5'
+saved_RF_classifier:            'data/processed/RF_classifier_saved_model.pkl'
+Self_correction_dataset:        'data/processed/dataset_self_correction_algorithm.h5'
 ##---------------------------------------------------------------------##

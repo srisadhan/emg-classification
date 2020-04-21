@@ -77,7 +77,7 @@ def subject_pooled_EMG_data(subjects, path, config):
     data = dd.io.load(path)
 
     # Subject information
-    subjects = config['subjects']
+    # subjects = config['subjects']
 
     # Empty array (list)
     x = []
@@ -148,21 +148,18 @@ def subject_pooled_EMG_PB_data(subjects, path, config):
     emg = np.concatenate(emg, axis=0)
     pb  = np.concatenate(pb, axis=0)
     y   = np.concatenate(y, axis=0)
-    
-    return emg, pb, y
 
-    # uncomment the following line if you want to balance the data before splitting
-    # Balance the dataset
+    # # uncomment the following line if you want to balance the data before splitting
+    # # Balance the dataset
     # rus = RandomUnderSampler()
     # rus.fit_resample(y, y)
 
-    # Store them in dictionary
-    # features_emg = emg[rus.sample_indices_, :, :]
-    # pos = pb[rus.sample_indices_, :]
-    # labels = y[rus.sample_indices_, :]
-    # tags = tags[rus.sample_indices_, :]
+    # # Store them in dictionary
+    # emg = emg[rus.sample_indices_, :, :]
+    # pb = pb[rus.sample_indices_, :]
+    # y = y[rus.sample_indices_, :]
 
-    # return features_emg, pos, labels
+    return emg, pb, y
 
 
 def subject_dependent_data(path, config):
@@ -329,4 +326,58 @@ def split_pooled_EMG_PB_data_train_test(subjects, path, config):
     Data['test']  = testing_data
 
     return Data
-    
+
+
+# def subject_pooled_balanced_Correction_EMG_PB_data(subjects, path, config):
+#     """Balance and pool the data per each subject for the correction algorithm
+
+#     Parameters
+#     ----------
+#     subjects : list
+#         List of strings containing subject identifiers
+#     config : yaml
+#         The configuration file
+#     path : str
+#         path to the file
+#     Returns
+#     -------
+#     features_emg, pos, labels
+#         2 arrays features and labels.
+
+#     """
+
+#     # path = str(Path(__file__).parents[2] / config['clean_emg_data'])
+#     data = dd.io.load(path)
+
+#     # Empty array (list)
+#     emg = []
+#     pb = []
+#     y = []
+#     # tags = np.empty((0, 1))
+
+#     for subject in subjects:
+#         emg_temp = data['subject_' + subject]['EMG']
+#         pb_temp  = data['subject_' + subject]['PB']
+#         y_temp  = data['subject_' + subject]['labels']
+        
+#         emg.append(emg_temp)
+#         pb.append(pb_temp)
+#         y.append(y_temp)
+#         # tags = np.concatenate((tags, y_temp[:, 0:1] * 0 + 1), axis=0)
+
+#     # Convert to array
+#     emg = np.concatenate(emg, axis=0)
+#     pb  = np.concatenate(pb, axis=0)
+#     y   = np.concatenate(y, axis=0)
+
+#     # # uncomment the following line if you want to balance the data before splitting
+#     # # Balance the dataset
+#     # rus = RandomUnderSampler()
+#     # rus.fit_resample(y, y)
+
+#     # # Store them in dictionary
+#     # emg = emg[rus.sample_indices_, :, :]
+#     # pb = pb[rus.sample_indices_, :]
+#     # y = y[rus.sample_indices_, :]
+
+#     return emg, pb, y

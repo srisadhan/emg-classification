@@ -3,6 +3,9 @@ emg-classification-study
 
 Classification of effort in Human robot interaction using EMG.
 
+# Using the visdomlogger
+- start the application server from the terminal using: "python -m visdom.server"
+- 
 Project Organization
 ------------
 

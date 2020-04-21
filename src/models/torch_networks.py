@@ -51,3 +51,51 @@ class ShallowERPNet(nn.Module):
         out = torch.squeeze(out)
 
         return out
+
+
+class ShallowCorrectionNet(nn.Module):
+    """ A single Layer Neural Network for correcting time series predictions 
+    obtained from classifiers such as SVM, LDA, etc. 
+    
+    Parameters
+    ----------
+    config : dictionary
+        configuration loaded from the config.yaml file
+    
+    """
+    
+    def __init__(self, config):
+        super(ShallowCorrectionNet, self).__init__()
+        self.epoch_length = config['epoch_length']
+        self.s_freq = config['sfreq2']
+        self.n_electrodes = config['n_electrodes']
+    
+        # network parameters
+        self.inputFeatures = config['SELF_CORRECTION_NN']['INPUTS']
+        self.hiddenUnits = config['SELF_CORRECTION_NN']['HIDDEN_UNITS']
+        self.outputSize = config['SELF_CORRECTION_NN']['OUTPUTS']
+        
+        # Fully connected layers
+        self.layer1 = nn.Linear(self.inputFeatures, self.hiddenUnits)
+        self.layer2 = nn.Linear(self.hiddenUnits, self.outputSize)
+        # activation function
+        self.act    = nn.Tanh()
+
+        # weights
+        self.W1 = torch.randn(self.inputFeatures, self.hiddenUnits)
+        self.W2 = torch.randn(self.hiddenUnits, self.outputSize)
+
+    def forward(self, x):
+
+        # feed forward operation
+        # z1          = torch.matmul(x, self.W1)
+        # a1          = act(z1)
+        # z2          = torch.matmul(a1, self.W2)
+        # self.out    = act(z2)
+        z1          = self.layer1(x)
+        a1          = self.act(z1)
+        z2          = self.layer2(a1)
+        self.out    = self.act(z2)
+
+        return self.out
+    

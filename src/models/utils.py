@@ -91,7 +91,8 @@ def visual_log(title):
 
     """
     visual_logger = VisdomPlotLogger(
-        'line',
+        'line', 
+        # port=4321, server='127.0.0.1',
         opts=dict(legend=['Training', 'Validation', 'Testing'],
                   xlabel='Epochs',
                   ylabel='Accuracy',

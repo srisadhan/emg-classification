@@ -406,12 +406,15 @@ def get_emg_epoch(subject,raw_emg, time, config):
     # Parameters
     epoch_length = config['epoch_length']
     overlap = config['overlap']
-
+    
     if subject in config['subjects2']:
         raw_cropped = raw_emg.copy().resample(config['sfreq2'], npad='auto', verbose='error')
     else:
         raw_cropped = raw_emg.copy().crop(tmin=time[0], tmax=time[1])
         raw_cropped = raw_cropped.copy().resample(config['sfreq2'], npad='auto', verbose='error')
+
+    if config['high_pass_filter']:
+        raw_cropped = raw_cropped.filter(l_freq=config['filter_freq'][0], h_freq=None, picks=['emg_1', 'emg_2', 'emg_3', 'emg_4', 'emg_5', 'emg_6', 'emg_7', 'emg_8'])
 
     events = mne.make_fixed_length_events(raw_cropped,
                                           duration=epoch_length,
@@ -420,6 +423,7 @@ def get_emg_epoch(subject,raw_emg, time, config):
                         events,
                         tmin=0,
                         tmax=config['epoch_length'],
+                        baseline=None,
                         verbose=False)
     return epochs
 
@@ -455,12 +459,11 @@ def create_emg_epoch(subjects, trials, read_path, config):
     # Loop over all subjects and error types
     for subject in subjects:
         temp = collections.defaultdict(dict)
-
         if subject in config['test_subjects']:
-            for trial in config['comb_trials']:
+            for trial in config['trials']:
                 raw_emg = data['subject_' + subject]['EMG'][trial]
                 time = data['subject_' + subject]['time'][trial]
-
+                
                 # Create epoch data
                 temp['EMG'][trial] = get_emg_epoch(subject,raw_emg, time, config)
                 temp['time'][trial] = time
@@ -468,7 +471,6 @@ def create_emg_epoch(subjects, trials, read_path, config):
             for trial in ['HighFine', 'LowGross', 'HighGross', 'LowFine']:
                 raw_emg = data['subject_' + subject]['EMG'][trial]
                 time = data['subject_' + subject]['time'][trial]
-
                 # Create epoch data
                 temp['EMG'][trial] = get_emg_epoch(subject,raw_emg, time, config)
                 temp['time'][trial] = time
@@ -705,13 +707,13 @@ def create_PB_data(subjects, trials, config):
         data = collections.defaultdict(dict)
 
         if subject not in config['test_subjects']:
-            for trial in trials:
-                if trial not in config['comb_trials']:
-                    raw_data, time = get_PB_data(subject, trial, config)   
-                    data['PB'][trial] = raw_data
-                    data['time'][trial] = time
+            for trial in (set(config['trials']) - set(config['comb_trials'])):
+                raw_data, time = get_PB_data(subject, trial, config)   
+                data['PB'][trial] = raw_data
+                data['time'][trial] = time
         else:
-            for trial in config['comb_trials']:
+            # for trial in config['comb_trials']:
+            for trial in config['trials']:
                 raw_data, time = get_PB_data(subject, trial, config)   
                 data['PB'][trial] = raw_data
                 data['time'][trial] = time
@@ -753,6 +755,7 @@ def get_PB_epoch(subject,raw_data, config):
                         events,
                         tmin=0,
                         tmax=config['epoch_length'],
+                        baseline=None,
                         verbose=False)
     return epochs
 
@@ -788,16 +791,16 @@ def create_PB_epoch(subjects, trials, config):
         temp = collections.defaultdict(dict)
 
         if subject not in config['test_subjects']:
-            for trial in trials:
-                if trial not in config['comb_trials']:
-                    raw_data = data['subject_' + subject]['PB'][trial]
-                    time = data['subject_' + subject]['time'][trial]
+            for trial in (set(config['trials']) - set(config['comb_trials'])):
+                raw_data = data['subject_' + subject]['PB'][trial]
+                time = data['subject_' + subject]['time'][trial]
 
-                    # Create epoch data
-                    temp['PB'][trial] = get_PB_epoch(subject, raw_data, config)
-                    temp['time'][trial] = time
+                # Create epoch data
+                temp['PB'][trial] = get_PB_epoch(subject, raw_data, config)
+                temp['time'][trial] = time
         else:
-            for trial in config['comb_trials']:
+            # for trial in config['comb_trials']:
+            for trial in config['trials']:
                 raw_data = data['subject_' + subject]['PB'][trial]
                 time = data['subject_' + subject]['time'][trial]
 
@@ -823,8 +826,12 @@ def tangential_normal_force_components(data):
     pos_xy      = data[2:4,:]
 
     for i in range(2, pos_xy.shape[0]-2):
-        pos_xy[i,0] = np.ma.average(pos_xy[i-2:i+3, 0])
-        pos_xy[i,1] = np.ma.average(pos_xy[i-2:i+3, 1])
+        #FIXME: I should not be using this because I don't have future information
+        # pos_xy[i,0] = np.ma.average(pos_xy[i-2:i+3, 0])
+        # pos_xy[i,1] = np.ma.average(pos_xy[i-2:i+3, 1])
+
+        pos_xy[i,0] = np.ma.average(pos_xy[i-5:i, 0])
+        pos_xy[i,1] = np.ma.average(pos_xy[i-5:i, 1])
         
     # i dont think fitting a polynomial and finding tangent is appropriate
     # for i in range(2, pos.shape[0]-2):

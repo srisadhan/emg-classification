@@ -6,6 +6,8 @@ import sys
 import random
 import statistics
 import copy
+import math
+import torch
 # import hdf5storage
 import h5py
 import numpy as np
@@ -13,15 +15,18 @@ from pathlib import Path
 
 from pyriemann.estimation import Covariances, Shrinkage, Coherences
 from pyriemann.tangentspace import TangentSpace, FGDA
-from pyriemann.utils.distance import distance, distance_riemann
+from pyriemann.utils.distance import distance, distance_riemann, distance_logeuclid
 from pyriemann.utils.mean import mean_riemann
-from pyriemann.classification import MDM
+from pyriemann.classification import MDM, TSclassifier
 from pyriemann.channelselection import ElectrodeSelection
+from pyriemann.embedding import Embedding
+from pyriemann.spatialfilters import SPoC, CSP
 # from pyriemann.utils.viz import plot_confusion_matrix
 
 from pathlib import Path
 import collections
-from data.clean_data import clean_epoch_data, clean_combined_data, clean_intersession_test_data
+from data.clean_data import (clean_epoch_data, clean_combined_data, clean_intersession_test_data, 
+                            clean_combined_data_for_fatigue_study, clean_correction_data, balance_correction_data, pool_correction_data)
 from data.create_data import (create_emg_data, create_emg_epoch, create_PB_data,
                               create_PB_epoch, create_robot_dataframe,
                               sort_order_emg_channels)
@@ -33,19 +38,23 @@ from datasets.riemann_datasets import (subject_pooled_EMG_data,
                                        subject_pooled_EMG_PB_data,
                                        split_pooled_EMG_PB_data_train_test)
 
-from datasets.torch_datasets import pooled_data_iterator
+from datasets.torch_datasets import pooled_data_iterator, pooled_data_SelfCorrect_NN
 from datasets.statistics_dataset import matlab_dataframe
 
 from models.riemann_models import (tangent_space_classifier,
                                    svm_tangent_space_cross_validate,
                                    tangent_space_prediction)
 from models.statistical_models import mixed_effect_model
-from models.torch_models import train_torch_model
-from models.torch_networks import ShallowERPNet
+from models.torch_models import train_torch_model, train_correction_network
+from models.torch_networks import ShallowERPNet, ShallowCorrectionNet
 from sklearn.model_selection import cross_val_score, KFold
 from sklearn.pipeline import make_pipeline
-from sklearn.svm import SVC
+from sklearn.svm import SVC, SVR 
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.decomposition import PCA
+from sklearn.feature_selection import SelectFromModel, RFE
+from sklearn.covariance import ShrunkCovariance
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 
 from features.emg_features import (extract_emg_features, pool_subject_emg_features,
                                 svm_cross_validated_pooled_emg_features,
@@ -59,11 +68,13 @@ from utils import (skip_run, save_data, save_trained_pytorch_model, plot_confusi
 
 from sklearn.svm import SVC
 from imblearn.under_sampling import RandomUnderSampler
-from scipy import signal
+import scipy  
 from sklearn.manifold import TSNE
 from umap import UMAP
 from mpl_toolkits.mplot3d import Axes3D
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, accuracy_score
+import treegrad as tgd 
+import joblib
 
 # The configuration file
 config = yaml.load(open('src/config.yml'), Loader=yaml.SafeLoader)
@@ -87,16 +98,6 @@ with skip_run('skip', 'create_emg_epoch') as check, check():
     save_path = Path(__file__).parents[1] / config['epoch_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'clean_emg_epoch') as check, check():
-    data = clean_epoch_data(config['subjects'], config['trials'], 'EMG', config)
-    
-    # Save the dataset
-    if config['n_class'] == 3:
-        save_path = Path(__file__).parents[1] / config['clean_emg_data_3class']
-    elif config['n_class'] == 4:
-        save_path = Path(__file__).parents[1] / config['clean_emg_data_4class']
-
-    save_data(str(save_path), data, save=True)
 
 # ------------------ Create Robot data --------------------- #
 with skip_run('skip', 'create_PB_data') as check, check():
@@ -111,6 +112,17 @@ with skip_run('skip', 'create_PB_epoch') as check, check():
     # save the data
     path = Path(__file__).parents[1] / config['epoch_PB_data']
     dd.io.save(str(path), data)
+
+with skip_run('skip', 'clean_emg_epoch') as check, check():
+    data = clean_epoch_data(config['subjects'], config['trials'], 'EMG', config)
+    
+    # Save the dataset
+    if config['n_class'] == 3:
+        save_path = Path(__file__).parents[1] / config['clean_emg_data_3class']
+    elif config['n_class'] == 4:
+        save_path = Path(__file__).parents[1] / config['clean_emg_data_4class']
+
+    save_data(str(save_path), data, save=True)
 
 with skip_run('skip', 'clean_PB_epoch_data') as check, check():
     data = clean_epoch_data(config['subjects'], config['trials'], 'PB', config)
@@ -131,6 +143,57 @@ with skip_run('skip', 'save_EMG_PB_data') as check, check():
     path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
     dd.io.save(path, features)
 
+with skip_run('skip', 'save_EMG_PB_data_for_Rakesh') as check, check():
+    
+    subjects = ['9007_2']
+    features1 = clean_combined_data_for_fatigue_study(subjects, ['LowComb'], config['n_class'], config)
+    features2 = clean_combined_data_for_fatigue_study(subjects, ['HighComb'], config['n_class'], config)
+
+    # path to save
+    path = str(Path(__file__).parents[1] / config['dataset_fatigue_study1'])
+    dd.io.save(path, features1)
+
+    path = str(Path(__file__).parents[1] / config['dataset_fatigue_study2'])
+    dd.io.save(path, features2)
+
+with skip_run('skip', 'save_EMG_PB_data_for_Dr_Ehsan') as check, check():
+    
+    subjects = config['subjects']
+    features_raw = clean_combined_data(subjects, config['trials'], config['n_class'], config)
+
+    features_cov = collections.defaultdict()
+    features_ts  = collections.defaultdict()
+
+    for subject in subjects:
+        data1 = collections.defaultdict()
+        data2 = collections.defaultdict()
+
+        cov = Covariances().fit_transform(features_raw['subject_'+subject]['EMG'])
+        ts = TangentSpace().fit_transform(cov)
+        
+        data1['EMG']    = cov
+        data1['PB']     = features_raw['subject_'+subject]['PB']
+        data1['labels'] = features_raw['subject_'+subject]['labels']
+
+        data2['EMG']    = ts
+        data2['PB']     = features_raw['subject_'+subject]['PB']
+        data2['labels'] = features_raw['subject_'+subject]['labels']
+
+        features_cov['subject_'+subject] = data1
+        features_ts['subject_'+subject] = data2
+    
+    # path to save raw data
+    file_path = str(Path(__file__).parents[1] / config['epochs_for_Dr_Ehsan'])
+    scipy.io.savemat(file_path, features_raw)
+
+    # path to save covariance data
+    file_path = str(Path(__file__).parents[1] / config['covariance_for_Dr_Ehsan'])
+    scipy.io.savemat(file_path, features_cov)
+
+    # path to save tangent space features
+    file_path = str(Path(__file__).parents[1] / config['tangent_feat_for_Dr_Ehsan'])
+    scipy.io.savemat(file_path, features_ts)
+    dd.io.save(str(Path(__file__).parents[1] / config['tangent_feat_for_Joe']), features_ts)
 
 ### --------------- Pilot analysis --------------------###
 with skip_run('skip', 'create_statistics_dataframe') as check, check():
@@ -250,7 +313,7 @@ with skip_run('skip', 'sort_order_emg_channels') as check, check():
     save_data(path,data,save=True)
 
 with skip_run('skip', 'extract_emg_features') as check, check():
-    sort_channels = True
+    sort_channels = False
     if sort_channels:
         print("-----Sorting the features based on the decreasing variance of the EMG for each subject-----")
     else:
@@ -399,7 +462,67 @@ with skip_run('skip', 'extract_force_features') as check, check():
 
 # -------------------- Classification --------------------- #
 ##-- Classification using Riemannian features--##
-with skip_run('skip', 'classify_using_riemannian_emg_features') as check, check():
+with skip_run('skip', 'classify_using_riemannian_emg_features_cross_validate') as check, check():
+    # Subject information
+    subjects = set(config['subjects']) ^ set(config['test_subjects'])
+    if config['n_class'] == 3:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
+    elif config['n_class'] == 4:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
+
+    #FIXME:
+    # ------------------Remove this later --------------------
+    path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])    
+    features, _ , labels= subject_pooled_EMG_PB_data(subjects, path, config)
+    X   = features
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
+    # Balance the dataset
+    rus = RandomUnderSampler()
+    rus.fit_resample(y[:,np.newaxis], y[:,np.newaxis])
+    X = X[rus.sample_indices_, :, :]
+    y = y[rus.sample_indices_]
+    # -------------------------------------------------------
+    # X   = features
+    # y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+    
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    # Singular Value Decomposition of covest
+    # V = np.zeros((covest.shape[0], covest.shape[1] * covest.shape[2]))
+    # for i in range(0, covest.shape[0]):
+    #     _, _, v = np.linalg.svd(covest[i])
+    #     V[i,:] = np.ravel(v, order ='F')
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    
+    accuracy = cross_val_score(clf1, ts, y, cv=KFold(10,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf2, ts, y, cv=KFold(10,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    clf2.fit(ts, y)
+    # save the model to disk
+    filename = str(Path(__file__).parents[1] / config['saved_RF_classifier'])
+    joblib.dump(clf2, filename)
+
+    # Linear discriminant analysis - # does not provide good accuracy
+    # clf3 = LinearDiscriminantAnalysis(solver='svd')
+    # accuracy = cross_val_score(clf3, ts, y, cv=KFold(5,shuffle=True))
+    # print("cross validation accuracy using LDA: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+with skip_run('skip', 'classify_using_PCA_reduced_riemannian_emg_features_cross_validate') as check, check():
     # Subject information
     subjects = config['subjects']
     if config['n_class'] == 3:
@@ -420,23 +543,74 @@ with skip_run('skip', 'classify_using_riemannian_emg_features') as check, check(
     # project the covariance into the tangent space
     ts = TangentSpace().fit_transform(covest)
 
-    # Singular Value Decomposition of covest
-    # V = np.zeros((covest.shape[0], covest.shape[1] * covest.shape[2]))
-    # for i in range(0, covest.shape[0]):
-    #     _, _, v = np.linalg.svd(covest[i])
-    #     V[i,:] = np.ravel(v, order ='F')
+    for comp in [36, 10, 8]:
+        print('# PCA components: %d' %(comp))
+        feat_PCA = PCA(n_components=comp, copy=True, whiten=False, svd_solver='auto', tol=0.0, iterated_power='auto', random_state=None).fit(ts)
+        cov = feat_PCA.get_covariance()
+        ts = feat_PCA.transform(ts)
+        print(np.diagonal(cov))
 
+        # SVM classifier
+        clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+        # Random forest classifier
+        clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+        
+        accuracy = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+        print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+        accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+        print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+with skip_run('skip', 'classify_using_riemannian_emg_features_split_train_test') as check, check():
+    split_percent = 0.7 # train split percentage
+    # Subject information
+    subjects = config['subjects']
+    if config['n_class'] == 3:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
+    elif config['n_class'] == 4:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
+
+    X   = features
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
+    
+    # shuffle the data
+    ind = np.random.permutation(np.arange(X.shape[0]))
+    X   = X[ind, :, :]
+    y   = y[ind]
+
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+
+    ind = round(split_percent * X.shape[0])
+    train_X = X[0:ind, :, :]
+    train_y = y[0:ind]
+
+    test_X = X[ind:, :, :]
+    test_y = y[ind:]
+
+    print(test_X.shape, test_y.shape)
+    # estimation of the covariance matrix and project the covariance into the tangent space
+    train_covest = Covariances().fit_transform(train_X)
+    train_ts = TangentSpace().fit_transform(train_covest)
+
+    # estimation of the covariance matrix and project the covariance into the tangent space
+    test_covest = Covariances().fit_transform(test_X)
+    test_ts = TangentSpace().fit_transform(test_covest)
 
     # SVM classifier
     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
     # Random forest classifier
     clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    
+    model    = clf1.fit(train_ts, train_y)
+    accuracy = model.score(test_ts, test_y)
+    print("Accuracy using SVM: %0.4f " % (accuracy.mean()))
 
-    accuracy = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
-    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
-
-    accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
-    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+    model    = clf2.fit(train_ts, train_y)
+    accuracy = model.score(test_ts, test_y)
+    print("Accuracy using Random Forest: %0.4f " % (accuracy.mean()))
 
 with skip_run('skip', 'classify_using_mean_force_features') as check, check():
     # Subject information
@@ -450,6 +624,11 @@ with skip_run('skip', 'classify_using_mean_force_features') as check, check():
     # Load main data
     features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
     print(features.shape)
+
+    #FIXME: Remove the following and replace it by the line in the bottom
+    # X = np.zeros((features.shape[0],2))
+    # for i in range(features.shape[0]):
+    #     X[i, :] = np.mean(PCA().fit_transform(np.transpose(features[i,4:6,:])), axis=0)
 
     # use 0,1 columns for the actual force and 4,5 for the tangential and normal components
     X   = np.mean(features[:,4:6,:], axis=2)
@@ -599,21 +778,24 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     random.shuffle(subjects)
 
     # Number of subjects to train the classifier
-    N = 8
+    N = 15
 
     if config['n_class'] == 3:
         path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
     elif config['n_class'] == 4:
         path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
 
+    print('List of subjects chosen for training: ', subjects[0:N])
+    print('List of subjects chosen for testing : ', subjects[N:])
+    # sys.exit()
     # Load main data
     train_x, train_y, _ = subject_pooled_EMG_data(subjects[0:N], path, config)
     test_x, test_y, _   = subject_pooled_EMG_data(subjects[N:], path, config)
 
+    print('# Training samples: ', train_y.shape, '# Testing samples: ', test_y.shape)
+
     train_y = np.dot(train_y,np.array(np.arange(1, config['n_class']+1)))
     test_y  = np.dot(test_y,np.array(np.arange(1, config['n_class']+1)))
-
-    # print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0]))
 
     # estimation of the covariance matrix and its projection in tangent space
     train_cov = Covariances().fit_transform(train_x)
@@ -621,6 +803,39 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
 
     test_cov  = Covariances().fit_transform(test_x)
     test_ts   = TangentSpace().fit_transform(test_cov)
+
+    # calculate the mean covariance matrix of each class
+    class_mean_cov    = np.zeros((config['n_class'], config['n_electrodes'], config['n_electrodes']))
+    
+    for category in range(config['n_class']):
+        # pick all the covariances matrices that belong to corresponding class="category+1"
+        covest                          = Covariances().fit_transform(train_x[train_y == category + 1, :, :])
+        class_mean_cov[category,:,:]    = mean_riemann(covest)
+
+    train_cov_dists      = np.zeros((train_x.shape[0], config['n_class']))    
+    train_cov_dist_feats = np.zeros((train_x.shape[0], config['n_class']))    
+    for i in range(train_x.shape[0]):
+        for category in range(config['n_class']):
+            train_cov_dists[i, category] = distance_riemann(train_cov[i, :, :], class_mean_cov[category,:,:])
+        
+        # one hot encoding based on the minimum distance between the cov matrix and the class mean cov
+        temp_ind = np.argmin(train_cov_dists[i, :])
+        train_cov_dist_feats[i, temp_ind] = 1
+
+    test_cov_dists      = np.zeros((test_x.shape[0], config['n_class']))    
+    test_cov_dist_feats = np.zeros((test_x.shape[0], config['n_class']))    
+    for i in range(test_x.shape[0]):
+        for category in range(config['n_class']):
+            test_cov_dists[i, category] = distance_riemann(test_cov[i, :, :], class_mean_cov[category,:,:])
+        
+        # one hot encoding based on the minimum distance between the cov matrix and the class mean cov
+        temp_ind = np.argmin(test_cov_dists[i, :])
+        test_cov_dist_feats[i, temp_ind] = 1
+    print('_________ applying one hot encoding to the distance features _________')
+
+    # concatenate the cov_distance features with the tangent space features
+    train_ts = np.concatenate((train_ts, train_cov_dists), axis=1)
+    test_ts = np.concatenate((test_ts, test_cov_dists), axis=1)
 
     # SVM classifier
     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
@@ -637,6 +852,8 @@ with skip_run('skip', 'inter_session_transferability_using_riemannian_features')
     # Subject information
     subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
     subjects_test = config['test_subjects']
+    print('List of subject for training: ', subjects_train)
+    print('List of subject for testing : ', subjects_test)
 
     # clean_intersession_test_data(subjects_test, config['comb_trials'], config['n_class'], config)
 
@@ -650,6 +867,15 @@ with skip_run('skip', 'inter_session_transferability_using_riemannian_features')
     train_y = np.dot(train_y,np.array(np.arange(1, config['n_class']+1)))
     test_y = np.dot(test_y,np.array(np.arange(1, config['n_class']+1)))
 
+    # Balance the dataset
+    rus = RandomUnderSampler()
+    rus.fit_resample(train_y[:,np.newaxis], train_y[:,np.newaxis])
+
+    train_emg = train_emg[rus.sample_indices_, :, :]
+    train_pos = train_pos[rus.sample_indices_, :, :]
+    train_y = train_y[rus.sample_indices_]
+
+
     # print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class:4%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0],y[y==4].shape[0]))
 
     # SVM classifier
@@ -657,20 +883,81 @@ with skip_run('skip', 'inter_session_transferability_using_riemannian_features')
     # Random forest classifier
     clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
 
-
     #####----- EMG covariance matrix and its projection in tangent space
     print('*--------Accuracy reported from the EMG features')
     train_cov = Covariances().fit_transform(train_emg)
     train_X   = TangentSpace().fit_transform(train_cov)
-
+    
     test_cov  = Covariances().fit_transform(test_emg)
     test_X    = TangentSpace().fit_transform(test_cov)
 
-    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)
+    # Required if you want to include the distance based features
+    # # calculate the mean covariance matrix of each class
+    # class_mean_cov    = np.zeros((config['n_class'], config['n_electrodes'], config['n_electrodes']))
+
+    # for category in range(config['n_class']):
+    #     # pick all the covariances matrices that belong to corresponding class="category+1"
+    #     covest                          = Covariances().fit_transform(train_emg[train_y == category + 1, :, :])
+    #     class_mean_cov[category,:,:]    = mean_riemann(covest)
+
+    # train_cov_dists      = np.zeros((train_X.shape[0], config['n_class']))    
+    # train_cov_dist_feats = np.zeros((train_X.shape[0], config['n_class']))    
+    # for i in range(train_X.shape[0]):
+    #     for category in range(config['n_class']):
+    #         train_cov_dists[i, category] = distance_riemann(train_cov[i, :, :], class_mean_cov[category,:,:])
+        
+    #     # one hot encoding based on the minimum distance between the cov matrix and the class mean cov
+    #     temp_ind = np.argmin(train_cov_dists[i, :])
+    #     train_cov_dist_feats[i, temp_ind] = 1
+
+    # test_cov_dists      = np.zeros((test_X.shape[0], config['n_class']))    
+    # test_cov_dist_feats = np.zeros((test_X.shape[0], config['n_class']))    
+    # for i in range(test_X.shape[0]):
+    #     for category in range(config['n_class']):
+    #         test_cov_dists[i, category] = distance_riemann(test_cov[i, :, :], class_mean_cov[category,:,:])
+        
+    #     # one hot encoding based on the minimum distance between the cov matrix and the class mean cov
+    #     temp_ind = np.argmin(test_cov_dists[i, :])
+    #     test_cov_dist_feats[i, temp_ind] = 1
+    # print('_________ applying one hot encoding to the distance features _________')
+
+    # # concatenate the cov_distance features with the tangent space features
+    # train_X = np.concatenate((train_X, train_cov_dists), axis=1)
+    # test_X = np.concatenate((test_X, test_cov_dists), axis=1)
+
+    # print('*--------Accuracy reported from EMG features after PCA')
+    # train_X = PCA(n_components=10).fit_transform(train_X)
+    # test_X = PCA(n_components=10).fit_transform(test_X)
+
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)    
     print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
 
     accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
     print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+    print('*--------Accuracy reported from TS space EMG features using TreeGrad')
+    model = tgd.TGDClassifier(num_leaves=31, max_depth=-1, learning_rate=0.1, n_estimators=100, autograd_config={'refit_splits':False})
+    model.fit(train_X, train_y)
+    print("Inter-session tranfer accuracy using Deep Neural Random Forest: ", accuracy_score(test_y, model.predict(test_X)))
+
+    # Recursive feature elimination takes a lot of time but does not yield good results for inter-session accuracy
+    # print('*--------Accuracy reported after Recursive feature elimination')
+    # rfe = RFE(estimator=clf2, n_features_to_select=None, step=1)
+    # rfe.fit(train_X, train_y)
+    # accuracy = rfe.score(test_X, test_y)
+    # print("Inter-session tranfer accuracy using RF: %0.4f " % accuracy.mean())
+
+    # estimator = SVR(kernel="linear")
+    # rfe = RFE(estimator=estimator, n_features_to_select=None, step=1)
+    # rfe.fit(train_X, train_y)
+    # accuracy = rfe.score(test_X, test_y)
+    # print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+    # ranking = rfe.ranking_
+    # print(ranking)
+    # Plot pixel ranking
+    # plt.matshow(ranking, cmap=plt.cm.Blues)
+    # plt.colorbar()
+    # plt.title("Ranking of pixels with RFE")    
 
     #####------- mean Force features
     print('*--------Accuracy reported from the mean Force features:')
@@ -695,7 +982,19 @@ with skip_run('skip', 'inter_session_transferability_using_riemannian_features')
     print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
     #####------ EMG + force features
-    print('*--------Accuracy reported from the EMG + Force features:')
+    temp1 = np.array(np.linalg.norm(train_pos[:,0:2,:].mean(axis=2), axis=1)).reshape(train_cov.shape[0],1)
+    temp2 = np.array(np.linalg.norm(test_pos[:,0:2,:].mean(axis=2), axis=1)).reshape(test_cov.shape[0],1)
+    print('*--------Accuracy reported from the EMG + mean Force features:')
+    train_X   = np.concatenate((TangentSpace().fit_transform(train_cov), temp1), axis=1)
+    test_X    = np.concatenate((TangentSpace().fit_transform(test_cov),  temp2), axis=1)
+
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+    print('*--------Accuracy reported from the EMG + tangent Force features:')
     train_X   = np.concatenate((TangentSpace().fit_transform(train_cov), train_pos[:,4:6,:].mean(axis=2)), axis=1)
     test_X    = np.concatenate((TangentSpace().fit_transform(test_cov), test_pos[:,4:6,:].mean(axis=2)), axis=1)
 
@@ -705,6 +1004,7 @@ with skip_run('skip', 'inter_session_transferability_using_riemannian_features')
     accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
     print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
+    # plt.show()
 
 ## ------------Project features on to manifold----------------##
 with skip_run('skip', 'project_EMG_features') as check, check():
@@ -722,6 +1022,10 @@ with skip_run('skip', 'project_EMG_features') as check, check():
     X   = features
     y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
 
+    # if I want to project the features of only two classes
+    # X   = X[(y==1) | (y==4), :, :]
+    # y   = y[(y==1) | (y==4)]
+
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
 
@@ -731,7 +1035,7 @@ with skip_run('skip', 'project_EMG_features') as check, check():
     # ts = np.reshape(covest, (covest.shape[0], covest.shape[1] * covest.shape[2]), order='C')
     # print(ts.shape)
     # ts = ts[:,0:36]
-
+    
     temp1 = y == 1
     temp2 = y == 2
     temp3 = y == 3
@@ -747,18 +1051,18 @@ with skip_run('skip', 'project_EMG_features') as check, check():
     # plt.show()
 
     # UMAP based projection
-    for neighbor in [10, 30, 60]:
+    for neighbor in [10]: #, 30, 60]:
         fit = UMAP(n_neighbors=neighbor, min_dist=0.75, n_components=3, metric='chebyshev')
         X_embedded = fit.fit_transform(ts)
     
         fig = plt.figure()
         ax = Axes3D(fig)
 
-        ax.scatter(X_embedded[:,0], X_embedded[:,1], X_embedded[:,2], c=y.astype(int), cmap='viridis', s=2)
+        # ax.scatter(X_embedded[:,0], X_embedded[:,1], X_embedded[:,2], c=y.astype(int), cmap='viridis', s=2)
 
-        # ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],X_embedded[temp1,2],'bo')
-        # ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],X_embedded[temp2,2],'ro')
-        # ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'ko')
+        ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],X_embedded[temp1,2],'b.')
+        ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],X_embedded[temp2,2],'ro')
+        ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'k.')
     plt.show()
 
 with skip_run('skip', 'project_Force_data') as check, check():
@@ -773,7 +1077,7 @@ with skip_run('skip', 'project_Force_data') as check, check():
     # Load main data
     features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
 
-    X   = features[:,0:2,:]
+    X   = features[:,4:6,:]
     y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
     
     # y   = y[:-1]
@@ -806,9 +1110,9 @@ with skip_run('skip', 'project_Force_data') as check, check():
     plt.plot(ts[temp1,0], ts[temp1,1], 'r.')
     
     plt.legend(['LowGross','HighGross','LowFine','HighFine'])
-    plt.show()
+    # plt.show()
 
-    sys.exit()
+    # sys.exit()
     # ax = Axes3D(plt.figure())
     # ax.plot(ts[temp1,0],ts[temp1,1],ts[temp1,2],'b.')
     # ax.plot(ts[temp2,0],ts[temp2,1],ts[temp1,2],'r.')
@@ -969,7 +1273,7 @@ with skip_run('skip', 'classify_task_riemann_features') as check, check():
     # cohest = Coherences(window=100, overlap=0.75, fmin=None, fmax=None, fs=None).fit_transform(X)
     # for i in range(0,config['n_electrodes']-1):
     #     for j in range(i+1,config['n_electrodes']):
-    #         cohest = signal.coherence(X[:,i], X[:,j], fs=200.0, window='hann', nperseg=200, noverlap=50, nfft=None, detrend='constant', axis=-1)
+    #         cohest = scipy.signal.coherence(X[:,i], X[:,j], fs=200.0, window='hann', nperseg=200, noverlap=50, nfft=None, detrend='constant', axis=-1)
     #         print(cohest)
     #         sys.exit()
 
@@ -1004,9 +1308,8 @@ with skip_run('skip', 'classify_task_riemann_features') as check, check():
     print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
 
 
-
 ## -----------------files to test concepts-------------------##
-with skip_run('run', 'calculate_distance_features_using_mean_covariance') as check, check():
+with skip_run('skip', 'calculate_distance_features_using_mean_covariance') as check, check():
     # Subject information
     subjects = config['subjects']
     if config['n_class'] == 3:
@@ -1026,22 +1329,41 @@ with skip_run('run', 'calculate_distance_features_using_mean_covariance') as che
     class_mean_cov    = np.zeros((config['n_class'], config['n_electrodes'], config['n_electrodes']))
     
     for category in range(config['n_class']):
-        # pick all the covariances matrices that belong to corresponding class "category+1"
+        # pick all the covariances matrices that belong to corresponding class="category+1"
         covest                          = Covariances().fit_transform(X[y == category + 1, :, :])
         class_mean_cov[category,:,:]    = mean_riemann(covest)
     
+    if config['print_dist_between_mean_covs']:
+        if config['n_class'] == 3:
+            ind_cat = [[0,1], [0,2], [1,2]]
+        else:
+            ind_cat = [[0,1], [0,2], [0,3], [1,2], [1,3], [2,3]]
+        for ind in ind_cat:
+            temp_dist = distance_riemann(class_mean_cov[ind[0],:,:], class_mean_cov[ind[1],:,:])
+            # temp_dist = distance_logeuclid(class_mean_cov[ind[0],:,:], class_mean_cov[ind[1],:,:])
+
+            print(ind, temp_dist)
+
     # estimation of the covariance matrix
     covest = Covariances().fit_transform(X)
 
-    cov_dist_feats = np.zeros((X.shape[0], 3))
+    print('_________ applying one hot encoding to the distance features _________')
+    cov_dists      = np.zeros((X.shape[0], config['n_class']))    
+    cov_dist_feats = np.zeros((X.shape[0], config['n_class']))    
     for i in range(X.shape[0]):
         for category in range(config['n_class']):
-            cov_dist_feats[i, category] = distance_riemann(covest[i, :, :], class_mean_cov[category,:,:])
+            cov_dists[i, category] = distance_riemann(covest[i, :, :], class_mean_cov[category,:,:])
+            # cov_dists[i, category] = distance_logeuclid(covest[i, :, :], class_mean_cov[category,:,:])
 
+        
+        # one hot encoding based on the minimum distance between the cov matrix and the class mean cov
+        temp_ind = np.argmin(cov_dists[i, :])
+        cov_dist_feats[i, temp_ind] = 1
 
     # project the covariance into the tangent space
     ts = TangentSpace().fit_transform(covest)
-
+    
+    print('#_____________Accuracy without distance features _____________#')
     # SVM classifier
     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
     # Random forest classifier
@@ -1058,6 +1380,7 @@ with skip_run('run', 'calculate_distance_features_using_mean_covariance') as che
     accuracy_mdm = cross_val_score(clf3, covest, y, cv=KFold(5,shuffle=True))
     print("cross validation accuracy using Minimum distance to mean (MDM): %0.4f (+/- %0.4f)" % (accuracy_mdm.mean(), accuracy_mdm.std() * 2))
 
+    print('#_____________Accuracy with distance features _______________#')
     # concatenate the cov_distance features with the tangent space features
     ts = np.concatenate((ts, cov_dist_feats), axis=1)   
 
@@ -1078,78 +1401,117 @@ with skip_run('run', 'calculate_distance_features_using_mean_covariance') as che
     print("cross validation accuracy using Minimum distance to mean (MDM): %0.4f (+/- %0.4f)" % (accuracy_mdm.mean(), accuracy_mdm.std() * 2))
     
 
-#TODO: The channel selection has to be performed subject wise.
+
+# The channel selection performed for each subject.
 with skip_run('skip', 'accuracy_after_channel_selection') as check, check():
     # Subject information
     subjects = config['subjects']
     if config['n_class'] == 3:
-        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
+        file_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
     elif config['n_class'] == 4:
-        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+        file_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
     
-    # Load main data
-    features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
+    # load the data
+    data = dd.io.load(file_path)
 
-    X   = features
-    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
-    print(X.shape)
-    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+    # Subject information
+    subjects = config['subjects']
 
-    # calculate the mean covariance matrix of each class
-    # mean_cov    = np.zeros((config['n_class'], config['n_electrodes'], config['n_electrodes']))
-    
-    # for category in range(config['n_class']):
-    #     covest                  = Covariances().fit_transform(X[y==category+1,:,:])
-    #     mean_cov[category,:,:]  = mean_riemann(covest)
+    # Empty array (list)
+    X = []
+    y = []
 
-    # ind_list = [[0,1], [1,2], [2,0]]
-    # for ind in ind_list:
-    #     print(distance_riemann(mean_cov[ind[0],:,:], mean_cov[ind[1],:,:]))
+    for subject in subjects:
+        x_temp = data['subject_' + subject]['features']
+        y_temp = data['subject_' + subject]['labels']
 
-    accuracies_dict = collections.defaultdict()
-
-    for nelec in range(2, config['n_electrodes']+1):
-        data = collections.defaultdict()
+        y_temp = np.dot(y_temp,np.array(np.arange(1, config['n_class']+1)))
 
         # estimation of the covariance matrix
-        covest = Covariances().fit_transform(X)
+        covest = Covariances().fit_transform(x_temp)
 
         # Remove the channels using the channel selection algorithm
-        if nelec < config['n_electrodes']:
-            selecElecs = ElectrodeSelection(nelec=nelec)
-            mean_cov = selecElecs.fit(covest, y)
-            covest = mean_cov.transform(covest)
-            print(covest.shape)
+        selecElecs = ElectrodeSelection(nelec=6)
+        mean_cov = selecElecs.fit(covest, y_temp)
+        covest = mean_cov.transform(covest)
 
         # project the covariance into the tangent space
         ts = TangentSpace().fit_transform(covest)
+
+        X.append(ts)
+        y.append(y_temp)
+
+    # Convert to array
+    X = np.concatenate(X, axis=0)
+    y = np.concatenate(y, axis=0)
+
+    print(y.shape)
+    # Balance the dataset
+    rus = RandomUnderSampler()
+    rus.fit_resample(y.reshape(len(y) ,-1), y)
+
+    # Store them in dictionary
+    X = X[rus.sample_indices_, :]
+    y = y[rus.sample_indices_]
+
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    accuracy_svm = cross_val_score(clf1, X, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy_svm.mean(), accuracy_svm.std() * 2))
+    
+    accuracy_rf  = cross_val_score(clf2, X, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy_rf.mean(), accuracy_rf.std() * 2))
+
+    # accuracies_dict = collections.defaultdict()
+
+    # for nelec in range(2, config['n_electrodes']+1):
+    #     data = collections.defaultdict()
+
+    #     # estimation of the covariance matrix
+    #     covest = Covariances().fit_transform(X)
+
+    #     # Remove the channels using the channel selection algorithm
+    #     if nelec < config['n_electrodes']:
+    #         selecElecs = ElectrodeSelection(nelec=nelec)
+    #         mean_cov = selecElecs.fit(covest, y)
+    #         covest = mean_cov.transform(covest)
+    #         print(covest.shape)
+
+    #     # project the covariance into the tangent space
+    #     ts = TangentSpace().fit_transform(covest)
             
-        # SVM classifier
-        clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
-        # Random forest classifier
-        clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
-        # Minimum distance to mean classifier
-        clf3 = MDM()
+    #     # SVM classifier
+    #     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    #     # Random forest classifier
+    #     clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    #     # Minimum distance to mean classifier
+    #     clf3 = MDM()
 
 
-        accuracy_svm = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
-        print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy_svm.mean(), accuracy_svm.std() * 2))
+    #     accuracy_svm = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+    #     print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy_svm.mean(), accuracy_svm.std() * 2))
         
-        accuracy_rf  = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
-        print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy_rf.mean(), accuracy_rf.std() * 2))
+    #     accuracy_rf  = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+    #     print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy_rf.mean(), accuracy_rf.std() * 2))
 
-        accuracy_mdm = cross_val_score(clf3, covest, y, cv=KFold(5,shuffle=True))
-        print("cross validation accuracy using Minimum distance to mean (MDM): %0.4f (+/- %0.4f)" % (accuracy_mdm.mean(), accuracy_mdm.std() * 2))
+    #     accuracy_mdm = cross_val_score(clf3, covest, y, cv=KFold(5,shuffle=True))
+    #     print("cross validation accuracy using Minimum distance to mean (MDM): %0.4f (+/- %0.4f)" % (accuracy_mdm.mean(), accuracy_mdm.std() * 2))
 
-        data['SVM'] = accuracy_svm 
-        data['RF']  = accuracy_rf
-        data['MDM'] = accuracy_mdm
+    #     data['SVM'] = accuracy_svm 
+    #     data['RF']  = accuracy_rf
+    #     data['MDM'] = accuracy_mdm
 
-        accuracies_dict[nelec] = data
+    #     accuracies_dict[nelec] = data
 
-    # save the accuracies of the classifiers after removing channels 
-    path = str(Path(__file__).parents[1] / config['accuracies_channel_selection'])
-    dd.io.save(path, accuracies_dict)
+    # # save the accuracies of the classifiers after removing channels 
+    # path = str(Path(__file__).parents[1] / config['accuracies_channel_selection'])
+    # dd.io.save(path, accuracies_dict)
 
 with skip_run('skip', 'plot_errorbar_for_accuracies_after_channel_selection') as check, check():
 
@@ -1190,3 +1552,559 @@ with skip_run('skip', 'plot_errorbar_for_accuracies_after_channel_selection') as
 
     plt.legend()
     plt.show()
+
+with skip_run('skip', 'classify_using_riemannian_emg_features_Deep_neural_decision_forest') as check, check():
+    # Subject information
+    subjects = config['subjects']
+    if config['n_class'] == 3:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
+    elif config['n_class'] == 4:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
+
+    X   = features
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+
+    # estimation of the covariance matrix
+    covest = Covariances(estimator='oas').fit_transform(X)
+
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    mod = tgd.TGDClassifier(num_leaves=31, max_depth=-1, learning_rate=0.1, n_estimators=100, autograd_config={'refit_splits':False})
+
+    mod.fit(ts, y)
+    print(accuracy_score(y, mod.predict(ts)))
+    # accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+    # print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+##-- Classification using Riemannian features--##
+with skip_run('skip', 'classify_using_riemannian_emg_features_using_Shrunk_Covariance') as check, check():
+    # Subject information
+    subjects = config['subjects']
+    if config['n_class'] == 3:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
+    elif config['n_class'] == 4:
+        save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+    # Load main data
+    features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
+
+    X   = features
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+
+    # Estimating covariance using shrunk covariance approach
+    covest = np.zeros((X.shape[0], config['n_electrodes'], config['n_electrodes']))
+    for i in range(X.shape[0]):
+        cov = ShrunkCovariance().fit(np.transpose(X[i,:,:]))
+        covest[i,:,:] = cov.covariance_
+    
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    
+    accuracy = cross_val_score(clf1, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf2, ts, y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+with skip_run('skip', 'inter_session_transferability_using_riemannian_features') as check, check():
+    # Subject information
+    subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
+    subjects_test = config['test_subjects']
+    print('List of subject for training: ', subjects_train)
+    print('List of subject for testing : ', subjects_test)
+
+    # clean_intersession_test_data(subjects_test, config['comb_trials'], config['n_class'], config)
+
+    # load the data
+    path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
+    
+    train_emg, train_pos, train_y = subject_pooled_EMG_PB_data(subjects_train, path, config)
+    test_emg, test_pos, test_y   = subject_pooled_EMG_PB_data(subjects_test, path, config)
+
+    # convert the labels from one-hot-encoding to int
+    train_y = np.dot(train_y,np.array(np.arange(1, config['n_class']+1)))
+    test_y = np.dot(test_y,np.array(np.arange(1, config['n_class']+1)))
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    #####----- EMG covariance matrix and its projection in tangent space
+    print('*--------Accuracy reported from the EMG features')
+    train_cov = Covariances().fit_transform(train_emg)
+    train_X   = TangentSpace().fit_transform(train_cov)
+    
+    test_cov  = Covariances().fit_transform(test_emg)
+    test_X    = TangentSpace().fit_transform(test_cov)
+
+    # Balance the dataset
+    rus = RandomUnderSampler()
+    rus.fit_resample(train_y[:,np.newaxis], train_y[:,np.newaxis])
+
+    train_cov = train_cov[rus.sample_indices_, :, :]
+    train_X = train_X[rus.sample_indices_, :]
+    train_pos = train_pos[rus.sample_indices_, :, :]
+    train_y = train_y[rus.sample_indices_]
+
+    # print('*--------Accuracy reported from EMG features after PCA')
+    # train_X = PCA(n_components=10).fit_transform(train_X)
+    # test_X = PCA(n_components=10).fit_transform(test_X)
+
+    # accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)    
+    # print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    # accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    # print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+    print('*--------Accuracy reported from TS space EMG features using TreeGrad')
+    model = tgd.TGDClassifier(num_leaves=31, max_depth=-1, learning_rate=0.1, n_estimators=100, autograd_config={'refit_splits':False})
+    model.fit(train_X, train_y)
+    print("Inter-session tranfer accuracy using Deep Neural Random Forest: ", accuracy_score(test_y, model.predict(test_X)))
+
+    #####------- mean Force features
+    print('*--------Accuracy reported from the mean Force features:')
+    train_X   = train_pos[:,0:2,:].mean(axis=2)
+    test_X    = test_pos[:,0:2,:].mean(axis=2)
+
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+    # print probabilities and log-probabilities
+    print(clf2.predict_proba(test_X).shape, test_y, clf2.predict_proba(test_X))
+    print(clf2.predict_log_proba(test_X).shape, test_y, clf2.predict_log_proba(test_X))
+    sys.exit()
+
+    #####------- PCA based projection of forces in major-minor direction
+    print('*--------Accuracy reported from the PCA projected force features:')
+    train_X   = train_pos[:,0:2,:]
+    test_X    = test_pos[:,0:2,:]
+
+    temp_trn = np.zeros((train_X.shape[0],2))
+    temp_tst = np.zeros((test_X.shape[0],2))
+    for i in range(train_X.shape[0]):
+        temp_trn[i, :] = np.mean(PCA().fit_transform(np.transpose(train_X[i,:,:])), axis=0)
+    
+    for i in range(test_X.shape[0]):
+        temp_tst[i, :] = np.mean(PCA().fit_transform(np.transpose(test_X[i,:,:])), axis=0)
+
+    train_X = temp_trn
+    test_X  = temp_tst
+
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+    #####------- mean of Tangent and Normal force 
+    print('*--------Accuracy reported from the mean Normal and Tangent Force features:')
+    train_X   = train_pos[:,4:6,:].mean(axis=2)
+    test_X    = test_pos[:,4:6,:].mean(axis=2)
+
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+    #####------ EMG + force features
+    temp1 = np.array(np.linalg.norm(train_pos[:,0:2,:].mean(axis=2), axis=1)).reshape(train_X.shape[0],1)
+    temp2 = np.array(np.linalg.norm(test_pos[:,0:2,:].mean(axis=2), axis=1)).reshape(test_X.shape[0],1)
+    print('*--------Accuracy reported from the EMG + mean Force features:')
+    train_X   = np.concatenate((TangentSpace().fit_transform(train_cov), temp1), axis=1)
+    test_X    = np.concatenate((TangentSpace().fit_transform(test_cov),  temp2), axis=1)
+
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+    print('*--------Accuracy reported from the EMG + tangent Force features:')
+    train_X   = np.concatenate((TangentSpace().fit_transform(train_cov), train_pos[:,4:6,:].mean(axis=2)), axis=1)
+    test_X    = np.concatenate((TangentSpace().fit_transform(test_cov), test_pos[:,4:6,:].mean(axis=2)), axis=1)
+
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+    print('*--------Accuracy reported from the EMG + PCA projected Force features:')
+    train_X   = np.concatenate((TangentSpace().fit_transform(train_cov), temp_trn), axis=1)
+    test_X    = np.concatenate((TangentSpace().fit_transform(test_cov), temp_tst), axis=1)
+
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+    # plt.show()
+
+# Use normalized covariance for training the classifier
+with skip_run('skip', 'normalize_covariance_each_subject') as check, check():
+    # define the estimator for covariance
+    estimator = 'oas'
+    # Subject information
+    subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
+    subjects_test = config['test_subjects']
+    print('List of subject for training: ', subjects_train)
+    print('List of subject for testing : ', subjects_test)
+
+    # Step 1: Calculate the covariance for each subject
+    # load the raw emg data
+    load_path1 = Path(__file__).parents[1] / config['raw_emg_data']
+    raw_data = dd.io.load(load_path1)
+
+    cov_data = collections.defaultdict()
+    for subject in subjects_train:
+        temp = np.empty((config['n_electrodes'],0))
+        for trial in (set(config['trials'])^set(config['comb_trials'])):
+            temp = np.concatenate((temp, raw_data['subject_'+subject]['EMG'][trial].get_data()), axis=1)
+        
+        cov_data['subject_'+subject] = math.sqrt(np.prod(np.diag(np.cov(temp))))
+
+    # load the epoch EMG and PB data
+    load_path2 = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
+    epoch_data = dd.io.load(load_path2)
+
+    train_X = np.empty((0,36))
+    train_y = np.empty((0,))
+    # Step 2: normalize the test covariances using the subject-wise covariance calculated in step 1
+    for subject in subjects_train:
+        emg_temp = epoch_data['subject_' + subject]['EMG']
+        y_temp   = np.dot(epoch_data['subject_' + subject]['labels'],np.array(np.arange(1, config['n_class']+1)))
+
+        # estimation of the correlation matrix
+        covest = (Covariances(estimator=estimator).fit_transform(emg_temp))/cov_data['subject_'+subject]
+
+        # project the covariance into the tangent space
+        ts = TangentSpace().fit_transform(covest)
+
+        train_X = np.concatenate((train_X, ts), axis=0)
+        train_y = np.concatenate((train_y, y_temp))
+
+    # Balance the dataset
+    rus = RandomUnderSampler()
+    rus.fit_resample(train_y[:,np.newaxis], train_y[:,np.newaxis])
+    train_X = train_X[rus.sample_indices_, :]
+    train_y = train_y[rus.sample_indices_]
+
+    test_X = np.empty((0,36))
+    test_y = np.empty((0,))
+    for subject in subjects_test:
+        # use the covariance calculated during first trial to normalize the test data
+        temp_list = subject.split('_')
+        temp_sub = temp_list[0] + '_' + '1'
+
+        emg_temp = epoch_data['subject_' + subject]['EMG']
+        y_temp   = np.dot(epoch_data['subject_' + subject]['labels'],np.array(np.arange(1, config['n_class']+1)))
+
+        # estimation of the correlation matrix
+        covest = (Covariances(estimator=estimator).fit_transform(emg_temp))/cov_data['subject_'+temp_sub]
+
+        # project the covariance into the tangent space
+        ts = TangentSpace().fit_transform(covest)
+
+        test_X = np.concatenate((test_X, ts), axis=0)
+        test_y = np.concatenate((test_y, y_temp))
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=200, oob_score=True)
+    
+    # cross-validation score on the training data
+    accuracy = cross_val_score(clf1, train_X, train_y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf2, train_X, train_y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    # inter-session accuracy
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)    
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+
+# use covariance shrinkage only on the testing data
+with skip_run('skip', 'cov_shrinkage_testing_data') as check, check():
+    # define the estimator for covariance
+    estimator = 'oas'
+    # Subject information
+    subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
+    subjects_test = config['test_subjects']
+    print('List of subject for training: ', subjects_train)
+    print('List of subject for testing : ', subjects_test)
+
+    # Step 1: Calculate the covariance for each subject
+    # load the raw emg data
+    load_path1 = Path(__file__).parents[1] / config['raw_emg_data']
+    raw_data = dd.io.load(load_path1)
+
+    # load the epoch EMG and PB data
+    load_path2 = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
+    epoch_data = dd.io.load(load_path2)
+
+    train_cov = np.empty((0,8,8))
+    train_X = np.empty((0,36))
+    train_y = np.empty((0,))
+    # Step 2: normalize the test covariances using the subject-wise covariance calculated in step 1
+    for subject in subjects_train:
+        emg_temp = epoch_data['subject_' + subject]['EMG']
+        y_temp   = np.dot(epoch_data['subject_' + subject]['labels'],np.array(np.arange(1, config['n_class']+1)))
+
+        # estimation of the correlation matrix
+        covest = (Covariances(estimator=estimator).fit_transform(emg_temp))
+
+        ts = covest[np.triu_indices(8)]
+        # apply covariance shrinkage
+        covest = Shrinkage().fit(covest).transform(covest)
+
+        # project the covariance into the tangent space
+        ts = TangentSpace(tsupdate=True).fit_transform(covest)
+
+        train_cov = np.concatenate((train_cov, covest), axis=0)
+        train_X = np.concatenate((train_X, ts), axis=0)
+        train_y = np.concatenate((train_y, y_temp))
+
+    # Balance the dataset
+    rus = RandomUnderSampler()
+    rus.fit_resample(train_y[:,np.newaxis], train_y[:,np.newaxis])
+    train_X = train_X[rus.sample_indices_, :]
+    train_y = train_y[rus.sample_indices_]
+    train_cov = train_cov[rus.sample_indices_, :, :]
+
+    test_cov = np.empty((0,8,8))
+    test_X = np.empty((0,36))
+    test_y = np.empty((0,))
+    for subject in subjects_test:
+        emg_temp = epoch_data['subject_' + subject]['EMG']
+        y_temp   = np.dot(epoch_data['subject_' + subject]['labels'],np.array(np.arange(1, config['n_class']+1)))
+
+        # estimation of the correlation matrix
+        covest = (Covariances(estimator=estimator).fit_transform(emg_temp))
+
+        # apply covariance shrinkage
+        covest = Shrinkage().fit(covest).transform(covest)
+
+        # project the covariance into the tangent space
+        ts = TangentSpace(tsupdate=True).fit_transform(covest)
+
+        test_cov = np.concatenate((test_cov, covest), axis=0)
+        test_X = np.concatenate((test_X, ts), axis=0)
+        test_y = np.concatenate((test_y, y_temp))
+
+    # predicted_y = TSclassifier(tsupdate=True).fit(train_cov, train_y).predict(test_cov)
+    # print(accuracy_score(test_y, predicted_y))
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=200, oob_score=True)
+    
+    # cross-validation score on the training data
+    accuracy = cross_val_score(clf1, train_X, train_y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf2, train_X, train_y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    # inter-session accuracy
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)    
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+# Apply Source Power Comodulation filter to the covariance matrix
+with skip_run('skip', 'classify_after_SPoC_filter') as check, check():
+    
+    # Subject information
+    subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
+    subjects_test = config['test_subjects']
+    print('List of subject for training: ', subjects_train)
+    print('List of subject for testing : ', subjects_test)
+
+    # load the epoch EMG and PB data
+    load_path2 = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
+    epoch_data = dd.io.load(load_path2)
+
+    train_X = np.empty((0,4))
+    train_y = np.empty((0,))
+
+    for subject in subjects_train:
+        emg_temp = epoch_data['subject_' + subject]['EMG']
+        y_temp   = np.dot(epoch_data['subject_' + subject]['labels'],np.array(np.arange(1, config['n_class']+1)))
+
+        # estimation of the correlation matrix
+        covest = (Covariances().fit_transform(emg_temp))
+
+        # project the covariance into the tangent space
+        spoc = SPoC().fit(covest, y_temp)
+        ts   = spoc.transform(covest)
+
+        # Common Spatial Patterns
+        # csp = CSP().fit(covest, y_temp)
+        # ts   = csp.transform(covest)
+
+        train_X = np.concatenate((train_X, ts), axis=0)
+        train_y   = np.concatenate((train_y, y_temp))
+
+    # Balance the dataset
+    rus = RandomUnderSampler()
+    rus.fit_resample(train_y[:,np.newaxis], train_y[:,np.newaxis])
+    train_X = train_X[rus.sample_indices_, :]
+    train_y = train_y[rus.sample_indices_]
+
+    test_X = np.empty((0,4))
+    test_y = np.empty((0,))
+    for subject in subjects_test:
+        # use the covariance calculated during first trial to normalize the test data
+        temp_list = subject.split('_')
+        temp_sub = temp_list[0] + '_' + '1'
+
+        emg_temp = epoch_data['subject_' + subject]['EMG']
+        y_temp   = np.dot(epoch_data['subject_' + subject]['labels'],np.array(np.arange(1, config['n_class']+1)))
+
+        # estimation of the correlation matrix
+        covest = (Covariances().fit_transform(emg_temp))#/cov_data['subject_'+temp_sub]
+
+        # project the covariance into the tangent space
+        spoc = SPoC().fit(covest, y_temp)
+        ts   = spoc.transform(covest)
+
+        # Common Spatial Patterns
+        # csp = CSP().fit(covest, y_temp)
+        # ts   = csp.transform(covest)
+
+        test_X = np.concatenate((test_X, ts), axis=0)
+        test_y = np.concatenate((test_y, y_temp))
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=200, oob_score=True)
+    
+    # cross-validation score on the training data
+    accuracy = cross_val_score(clf1, train_X, train_y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    accuracy = cross_val_score(clf2, train_X, train_y, cv=KFold(5,shuffle=True))
+    print("cross validation accuracy using Random Forest: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    # inter-session accuracy
+    accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)    
+    print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
+
+    accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
+    print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+ 
+
+# Apply the self-correction algorithm to the classifier output
+#-- Save the unpooled data
+with skip_run('skip', 'save_subjectwise_data_for_correcting_predictions') as check, check():
+    
+    data = clean_correction_data(config['subjects'], config['trials'], config['n_class'], config)
+    
+    # path to save the file
+    filepath = str(Path(__file__).parents[1] / config['subject_data_pred_correction'])
+    dd.io.save(filepath, data)
+
+#-- Save the weights of the RF classifier--#
+with skip_run('skip', 'save_RF_classifier_to_train_correction_NN') as check, check():
+    trials = list(set(config['trials']) - set(config['comb_trials']))
+
+    # path to load the file
+    filepath = str(Path(__file__).parents[1] / config['subject_data_pred_correction'])
+    data = dd.io.load(filepath)
+
+    # balance the data
+    data = balance_correction_data(data, trials, config['subjects'], config)
+
+    # TODO: Keep in mind that the subjects used for training the RF classifier don't have the second sessions 
+    subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
+    # extract the data
+    features, _, labels = pool_correction_data(data, subjects, trials, config)
+
+    X   = features
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
+
+    print(X.shape)
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+    
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    
+    accuracy = cross_val_score(clf2, ts, y, cv=KFold(10,shuffle=True))
+    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+
+    clf2.fit(ts, y)
+    accuracy = clf2.score(ts, y)
+    print("Training accuracy of  Random Forest: %0.4f" % (accuracy))
+    
+    # save the model to disk
+    filename = str(Path(__file__).parents[1] / config['saved_RF_classifier'])
+    joblib.dump(clf2, filename)
+
+with skip_run('skip', 'save_dataset_for_training_NeuralNet') as check, check():
+    # load the classifier 
+    filename = str(Path(__file__).parents[1] / config['saved_RF_classifier'])
+    RF_clf   = joblib.load(filename)
+
+    trials = list(set(config['trials']) - set(config['comb_trials']))
+
+    # path to load the file
+    filepath = str(Path(__file__).parents[1] / config['subject_data_pred_correction'])
+    data = dd.io.load(filepath)
+
+    # balance the data
+    data = balance_correction_data(data, trials, config['subjects'], config)
+
+    # create the dataset for NN
+    dataset = pooled_data_SelfCorrect_NN(data, RF_clf, config)
+
+    # save the dataset
+    filepath = Path(__file__).parents[1] / config['Self_correction_dataset']
+    dd.io.save(filepath, dataset)
+
+
+with skip_run('skip', 'self_correction_of_classifier_output') as check, check():
+    
+    # This is required for the code to run in windows
+    if __name__ == '__main__':
+        # torch.multiprocessing.freeze_support() # this is not requird 
+        # load the dataset
+        filepath = Path(__file__).parents[1] / config['Self_correction_dataset']
+        dataset  = dd.io.load(filepath)
+
+        # train the self-correction network
+        model, model_info = train_correction_network(ShallowCorrectionNet, config, dataset)
+
+        # save the model
+        path = Path(__file__).parents[1] / config['corrNet_trained_model_path']
+        save_path = str(path)
+        save_trained_pytorch_model(model, model_info, save_path, save_model=True)
