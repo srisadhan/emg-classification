@@ -341,9 +341,6 @@ def pooled_data_SelfCorrect_NN(data, clf, config):
     BATCH_SIZE = config['BATCH_SIZE']
     TEST_SIZE  = config['TEST_SIZE']
 
-    # Path of the stored data 
-    filepath = str(Path(__file__).parents[2] / config['clean_emg_pb_data'])
-    
     subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
     subjects_test  = config['test_subjects']
     trials         = list(set(config['trials']) ^ set(config['comb_trials']))
@@ -354,15 +351,11 @@ def pooled_data_SelfCorrect_NN(data, clf, config):
     # ------ Training data preparation
     features_train, labels_train = pool_classifier_output_NN(data, subjects_train, trials, clf, config)
 
-    # Balance the training dataset
+    # Balance the training dataset if not done previously
     rus = RandomUnderSampler()
     rus.fit_resample(labels_train, labels_train)
     features_train = features_train[rus.sample_indices_, :]
     labels_train = labels_train[rus.sample_indices_, :]
-
-    # tmp = np.argmax(labels_train, axis=1)
-    # print(len(tmp[tmp==0]), len(tmp[tmp==1]), len(tmp[tmp==2]))
-    # sys.exit()
 
     # Get training, validation, and testing ids_list
     ids_list = data_split_ids(labels_train, test_size=TEST_SIZE)

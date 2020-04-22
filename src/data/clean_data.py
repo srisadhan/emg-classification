@@ -210,7 +210,7 @@ def clean_epoch_data(subjects, trials, sensor, config):
 
     for subject in subjects:
         # Initialize for each subject
-        x = []
+        x_temp = []
         y_temp = []
 
         if subject not in config['test_subjects']:
@@ -610,10 +610,14 @@ def balance_correction_data(data, trials, subjects, config, balance=True):
         min_ind = find_balancing_cutoff_index(data['subject_'+subject], trials)
         
         for trial in trials:
-            if (config['n_class'] == 3 and trial == 'HighGross') or (config['n_class'] == 3 and trial == 'LowFine'):
-                ind = int((min_ind - 1) / 2)
+            if balance and subject not in config['test_subjects']:
+                if (config['n_class'] == 3 and trial == 'HighGross') or (config['n_class'] == 3 and trial == 'LowFine'):
+                    ind = int((min_ind - 1) / 2)
+                else:
+                    ind = min_ind
             else:
-                ind = min_ind
+                ind = data['subject_' + subject][trial]['labels'].shape[0]
+
             data['subject_' + subject][trial]['EMG']    = data['subject_' + subject][trial]['EMG'][:ind+1, :, :]
             data['subject_' + subject][trial]['PB']     = data['subject_' + subject][trial]['PB'][:ind+1, :]
             data['subject_' + subject][trial]['labels'] = data['subject_' + subject][trial]['labels'][:ind+1, :]

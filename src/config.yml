@@ -7,14 +7,14 @@ freq_bands:           [[4, 7], [8, 10], [11, 13], [14, 22], [23, 35], [35, 45]]
 Fs:                   200
 sfreq:                200
 sfreq2:               150 # sampling frequency of EMG in the exp 2   
-overlap:              0.75
+overlap:              0.5
 n_features:           4
 threshold:            1
 
 ##---------------------------------------------------------------------##
 # Neural network parameters
 OUTPUT:                   3
-NUM_EPOCHS:               50 #150
+NUM_EPOCHS:               150 
 BATCH_SIZE:               64
 LEARNING_RATE:            0.001
 TEST_SIZE:                0.15

@@ -81,14 +81,14 @@ config = yaml.load(open('src/config.yml'), Loader=yaml.SafeLoader)
 
 ### --------------- Preprocessing data --------------------###
 # ------------------- Create EMG data ---------------------- #
-with skip_run('skip', 'create_emg_data') as check, check():
+with skip_run('run', 'create_emg_data') as check, check():
     data = create_emg_data(config['subjects'], config['trials'], config)
 
     # Save the dataset
     save_path = Path(__file__).parents[1] / config['raw_emg_data']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'create_emg_epoch') as check, check():
+with skip_run('run', 'create_emg_epoch') as check, check():
     # file path
     read_path = Path(__file__).parents[1] / config['raw_emg_data']
 
@@ -100,20 +100,20 @@ with skip_run('skip', 'create_emg_epoch') as check, check():
 
 
 # ------------------ Create Robot data --------------------- #
-with skip_run('skip', 'create_PB_data') as check, check():
+with skip_run('run', 'create_PB_data') as check, check():
     data = create_PB_data(config['subjects'], config['trials'], config)
     # save the data
     path = Path(__file__).parents[1] / config['raw_PB_data']
     save_data(str(path), data, True)
 
-with skip_run('skip', 'create_PB_epoch') as check, check():
+with skip_run('run', 'create_PB_epoch') as check, check():
     data = create_PB_epoch(config['subjects'], config['trials'], config)
     
     # save the data
     path = Path(__file__).parents[1] / config['epoch_PB_data']
     dd.io.save(str(path), data)
 
-with skip_run('skip', 'clean_emg_epoch') as check, check():
+with skip_run('run', 'clean_emg_epoch') as check, check():
     data = clean_epoch_data(config['subjects'], config['trials'], 'EMG', config)
     
     # Save the dataset
@@ -124,7 +124,7 @@ with skip_run('skip', 'clean_emg_epoch') as check, check():
 
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'clean_PB_epoch_data') as check, check():
+with skip_run('run', 'clean_PB_epoch_data') as check, check():
     data = clean_epoch_data(config['subjects'], config['trials'], 'PB', config)
 
     # Save the dataset
@@ -134,7 +134,7 @@ with skip_run('skip', 'clean_PB_epoch_data') as check, check():
         save_path = Path(__file__).parents[1] / config['clean_PB_data_4class']
     save_data(str(save_path), data, save=True)
 
-with skip_run('skip', 'save_EMG_PB_data') as check, check():
+with skip_run('run', 'save_EMG_PB_data') as check, check():
     
     subjects = config['subjects']
     features = clean_combined_data(subjects, config['trials'], config['n_class'], config)
@@ -2020,7 +2020,7 @@ with skip_run('skip', 'classify_after_SPoC_filter') as check, check():
 
 # Apply the self-correction algorithm to the classifier output
 #-- Save the unpooled data
-with skip_run('skip', 'save_subjectwise_data_for_correcting_predictions') as check, check():
+with skip_run('run', 'save_subjectwise_data_for_correcting_predictions') as check, check():
     
     data = clean_correction_data(config['subjects'], config['trials'], config['n_class'], config)
     
@@ -2029,16 +2029,17 @@ with skip_run('skip', 'save_subjectwise_data_for_correcting_predictions') as che
     dd.io.save(filepath, data)
 
 #-- Save the weights of the RF classifier--#
-with skip_run('skip', 'save_RF_classifier_to_train_correction_NN') as check, check():
+with skip_run('run', 'save_RF_classifier_to_train_correction_NN') as check, check():
     trials = list(set(config['trials']) - set(config['comb_trials']))
 
     # path to load the file
     filepath = str(Path(__file__).parents[1] / config['subject_data_pred_correction'])
     data = dd.io.load(filepath)
 
-    # balance the data
-    data = balance_correction_data(data, trials, config['subjects'], config)
+    #TODO: change the balance flag if the data is supposed to be balanced
+    data = balance_correction_data(data, trials, config['subjects'], config, balance=True)
 
+    # -----------------------------Training the Random Forest classifier----------------------------------- #
     # TODO: Keep in mind that the subjects used for training the RF classifier don't have the second sessions 
     subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
     # extract the data
@@ -2060,17 +2061,38 @@ with skip_run('skip', 'save_RF_classifier_to_train_correction_NN') as check, che
     clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
     
     accuracy = cross_val_score(clf2, ts, y, cv=KFold(10,shuffle=True))
-    print("cross validation accuracy using SVM: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+    print("cross validation accuracy using RF: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
 
     clf2.fit(ts, y)
     accuracy = clf2.score(ts, y)
     print("Training accuracy of  Random Forest: %0.4f" % (accuracy))
     
+    # ------------------------------------------------------------------------------------------------------ #
+
+    # -----------------------------Testing the Random Forest classifier----------------------------------- #
+    # extract the data
+    features, _, labels = pool_correction_data(data, config['test_subjects'], trials, config)
+
+    X   = features
+    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
+
+    print(X.shape)
+    print('# of samples in Testing, Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0], y[y==4].shape[0]))
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+    
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    accuracy = clf2.score(ts, y)
+    print("Testing accuracy of Random Forest: %0.4f" % (accuracy))
+
     # save the model to disk
     filename = str(Path(__file__).parents[1] / config['saved_RF_classifier'])
     joblib.dump(clf2, filename)
 
-with skip_run('skip', 'save_dataset_for_training_NeuralNet') as check, check():
+with skip_run('run', 'save_dataset_for_training_NeuralNet') as check, check():
     # load the classifier 
     filename = str(Path(__file__).parents[1] / config['saved_RF_classifier'])
     RF_clf   = joblib.load(filename)
@@ -2081,8 +2103,8 @@ with skip_run('skip', 'save_dataset_for_training_NeuralNet') as check, check():
     filepath = str(Path(__file__).parents[1] / config['subject_data_pred_correction'])
     data = dd.io.load(filepath)
 
-    # balance the data
-    data = balance_correction_data(data, trials, config['subjects'], config)
+    #TODO: change the balance flag if the data is supposed to be balanced
+    data = balance_correction_data(data, trials, config['subjects'], config, balance=True)
 
     # create the dataset for NN
     dataset = pooled_data_SelfCorrect_NN(data, RF_clf, config)
@@ -2091,8 +2113,7 @@ with skip_run('skip', 'save_dataset_for_training_NeuralNet') as check, check():
     filepath = Path(__file__).parents[1] / config['Self_correction_dataset']
     dd.io.save(filepath, dataset)
 
-
-with skip_run('skip', 'self_correction_of_classifier_output') as check, check():
+with skip_run('run', 'self_correction_of_classifier_output') as check, check():
     
     # This is required for the code to run in windows
     if __name__ == '__main__':
