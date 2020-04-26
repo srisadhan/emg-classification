@@ -7,10 +7,13 @@ freq_bands:           [[4, 7], [8, 10], [11, 13], [14, 22], [23, 35], [35, 45]]
 Fs:                   200
 sfreq:                200
 sfreq2:               150 # sampling frequency of EMG in the exp 2   
-overlap:              0.5
+sfreq_IMU:            50
+overlap:              0.50
 n_features:           4
-threshold:            1
-
+threshold:            10 # from the Ninapro suggestion
+IMUAccScale:          2048
+IMUOriScale:          16384
+IMUGyroScale:         16
 ##---------------------------------------------------------------------##
 # Neural network parameters
 OUTPUT:                   3
@@ -41,9 +44,10 @@ pool_comb_task_data : False # pool the combined task into rest of the data for c
 print_dist_between_mean_covs : True # print the distance between all possible class covariance matrices.
 ##---------------------------------------------------------------------##
 # subjects : list of all the subjects (amir and my exp); subjects2 : list of subjects from my exp; test_subjects: list of subjects used for testing the classifier
-subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820', '8821', '8822', '8823', '8824', '9001_1', '9002_1', '9003_1', '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9002_2', '9003_2', '9005_2', '9006_2', '9007_2'] #, '9011_2']
+subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820', '8821', '8822', '8823', '8824', '9001_1',  '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9005_2', '9006_2', '9007_2'] #, '9002_1', '9003_1'] #, '9002_2', '9003_2', '9011_2']
 subjects2:            ['9001_1', '9002_1', '9003_1', '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9002_2', '9003_2', '9005_2', '9006_2', '9007_2'] #, '9011_2']
-test_subjects:        ['9002_2', '9003_2', '9005_2', '9006_2', '9007_2'] #, '9011_2']
+test_subjects:        ['9005_2', '9006_2', '9007_2'] #'9002_2', '9003_2', '9011_2'] # 9011_2 does not have HF, HG, LF, LG
+train_subjects:       ['9005_1', '9006_1', '9007_1'] #'9002_1', '9003_1', '9011_1'
 trials:               ['HighFine', 'LowGross', 'HighGross', 'LowFine', 'HighComb', 'LowComb']
 comb_trials:          ['HighComb', 'LowComb']
 test_all_trials:      False    # Test the accuracy of the classifier on all the 6 trails
@@ -57,13 +61,16 @@ exp2_data_path:                 'data/raw/exp2'
 force_data_path:                'data/raw/force_data/'
 raw_emg_data:                   'data/interim/raw_emg_exp_0_dataset.h5'
 raw_PB_data:                    'data/interim/raw_force_exp_0_dataset.h5'
+raw_IMU_data:                   'data/interim/raw_IMU_exp_0_dataset.h5'
 raw_pooled_emg_data:            'data/interim/raw_pooled_emg_exp_0_dataset.h5'
 epoch_emg_data:                 'data/processed/epoch_emg_exp_0_dataset.h5'
 epoch_PB_data:                  'data/processed/epoch_force_exp_0_dataset.h5'
+epoch_IMU_data:                 'data/processed/epoch_IMU_exp_0_dataset.h5'
 clean_emg_data_3class:          'data/processed/clean_emg_3class_dataset.h5'
 clean_emg_data_4class:          'data/processed/clean_emg_4class_dataset.h5'
 clean_PB_data_3class:           'data/processed/clean_force_3class_dataset.h5'
 clean_PB_data_4class:           'data/processed/clean_force_4class_dataset.h5'
+clean_IMU_data:                 'data/processed/clean_IMU_dataset.h5'
 clean_emg_pb_data:              'data/processed/clean_force_pos_emg_exp_0_dataset.h5' 
 subject_data_pred_correction:   'data/processed/data_for_pred_correction.h5'
 torch_dataset:                  'data/processed/torch_exp_0_dataset.h5'

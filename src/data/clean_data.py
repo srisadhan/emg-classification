@@ -95,7 +95,7 @@ def convert_to_array(subject, trial, path, sensor, config):
     return x_array, y_array
 
 
-def convert_test_trials_to_array(subject, emg_path, pb_path, trial, config):
+def convert_test_trials_to_array(subject, emg_path, pb_path, imu_path, trial, config):
     """Label the data and convert it to array.
 
     Parameter
@@ -128,14 +128,20 @@ def convert_test_trials_to_array(subject, emg_path, pb_path, trial, config):
         data  = dd.io.load(pb_path, group='/' + 'subject_' + subject)
         epochs_pb   = data['PB'][trial]
         
+        # load imu data
+        data  = dd.io.load(imu_path, group='/' + 'subject_' + subject)
+        epochs_imu  = data['IMU'][trial]
+        
         # Get array data
         emg_array = epochs_emg.get_data()
         pb_array  = epochs_pb.get_data()
-
+        imu_array = epochs_imu.get_data()
+        
         # match the PB and EMG data size    
         array_len = np.min([emg_array.shape[0], pb_array.shape[0]])
         emg_array = emg_array[:array_len, :, :]
         pb_array  = pb_array[:array_len, :, :]
+        imu_array = []
 
         # Label the combined task based on the position information
         pos = pb_array[:,2:4,:].mean(axis=2)
@@ -184,8 +190,16 @@ def convert_test_trials_to_array(subject, emg_path, pb_path, trial, config):
     else: 
         emg_array, y_array = convert_to_array(subject, trial, emg_path, 'EMG', config)
         pb_array, y_array = convert_to_array(subject, trial, pb_path, 'PB', config)
+        imu_array, y_array = convert_to_array(subject, trial, imu_path, 'IMU', config)
 
-    return emg_array, pb_array, y_array
+        # match the PB and EMG data size    
+        array_len = np.min([emg_array.shape[0], pb_array.shape[0], imu_array.shape[0]])
+        emg_array = emg_array[:array_len, :, :]
+        pb_array  = pb_array[:array_len, :, :]
+        imu_array = imu_array[:array_len, :, :]
+        y_array   = y_array[:array_len, :]
+        
+    return emg_array, pb_array, imu_array, y_array
 
 
 def clean_epoch_data(subjects, trials, sensor, config):
@@ -218,6 +232,8 @@ def clean_epoch_data(subjects, trials, sensor, config):
                 path = str(Path(__file__).parents[2] / config['epoch_emg_data'])
             elif (sensor == 'PB'):
                 path = str(Path(__file__).parents[2] / config['epoch_PB_data'])
+            elif (sensor == 'IMU'):
+                path = str(Path(__file__).parents[2] / config['epoch_IMU_data'])
 
             # (set(list_a) ^ set(list_b)) or (set(list_a) - set(list_b))) gives the elements in list_a that are not in list_b
             for trial in (set(config['trials']) - set(config['comb_trials'])):
@@ -228,32 +244,38 @@ def clean_epoch_data(subjects, trials, sensor, config):
 
         elif (config['pool_comb_task_data']):            
             emg_path = str(Path(__file__).parents[2] / config['epoch_emg_data'])
-            pb_path = str(Path(__file__).parents[2] / config['epoch_PB_data'])
+            pb_path  = str(Path(__file__).parents[2] / config['epoch_PB_data'])
+            imu_path = str(Path(__file__).parents[2] / config['epoch_IMU_data'])
 
             # for trial in config['comb_trials']: 
             for trial in config['trials']:            
-                emg_array, pb_array, y_array = convert_test_trials_to_array(subject, emg_path, pb_path, trial, config)
+                emg_array, pb_array, imu_array, y_array = convert_test_trials_to_array(subject, emg_path, pb_path, imu_path, trial, config)
                 
                 if (sensor == 'PB'):
                     x_array = pb_array
                 elif (sensor == 'EMG'):
                     x_array = emg_array
+                elif (sensor =='IMU'):
+                    x_array = imu_array
 
                 x_temp.append(x_array)
                 y_temp.append(y_array)
         else:            
             emg_path = str(Path(__file__).parents[2] / config['epoch_emg_data'])
-            pb_path = str(Path(__file__).parents[2] / config['epoch_PB_data'])
-
+            pb_path  = str(Path(__file__).parents[2] / config['epoch_PB_data'])
+            imu_path = str(Path(__file__).parents[2] / config['epoch_IMU_data'])
+            
             # for trial in config['comb_trials']: 
             for trial in (set(config['trials']) - set(config['comb_trials'])):            
-                emg_array, pb_array, y_array = convert_test_trials_to_array(subject, emg_path, pb_path, trial, config)
+                emg_array, pb_array, imu_array, y_array = convert_test_trials_to_array(subject, emg_path, pb_path, imu_path, trial, config)
                 
                 if (sensor == 'PB'):
                     x_array = pb_array
                 elif (sensor == 'EMG'):
                     x_array = emg_array
-
+                elif (sensor =='IMU'):
+                    x_array = imu_array
+                    
                 x_temp.append(x_array)
                 y_temp.append(y_array)
 
@@ -292,6 +314,7 @@ def clean_combined_data(subjects, trials, n_class, config):
         # Initialise for each subject
         EMG_temp = []
         PB_temp  = []
+        IMU_temp = []
         y_temp   = []
 
         if subject not in config['test_subjects']:
@@ -299,7 +322,8 @@ def clean_combined_data(subjects, trials, n_class, config):
                 # if trial not in config['comb_trials']:
                 path1 = str(Path(__file__).parents[2] / config['epoch_emg_data'])
                 path2 = str(Path(__file__).parents[2] / config['epoch_PB_data'])
-
+                path3 = str(Path(__file__).parents[2] / config['epoch_IMU_data'])
+                
                 # Concatenate the data corresponding to all trials types
                 EMG_array, y_array = convert_to_array(subject, trial, path1, 'EMG', config)
                 
@@ -307,14 +331,20 @@ def clean_combined_data(subjects, trials, n_class, config):
                 epochs = data['PB'][trial]
                 PB_array = epochs.get_data()
 
+                data = dd.io.load(path3, group='/' + 'subject_' + subject)
+                epochs = data['IMU'][trial]
+                IMU_array = epochs.get_data()
+                
                 # match the PB and EMG data size    
                 array_len = np.min([EMG_array.shape[0], PB_array.shape[0]])
                 EMG_array = EMG_array[:array_len, :, :]
                 PB_array  = PB_array[:array_len, :, :] 
+                IMU_array = IMU_array[:array_len, :, :]
                 y_array  = y_array[:array_len, :] 
 
                 EMG_temp.append(EMG_array)
                 PB_temp.append(PB_array)
+                IMU_temp.append(IMU_array)
                 y_temp.append(y_array)
         else:
             if config['test_all_trials']:
@@ -327,22 +357,25 @@ def clean_combined_data(subjects, trials, n_class, config):
             for trial in use_trials:
                 path1 = str(Path(__file__).parents[2] / config['epoch_emg_data'])
                 path2 = str(Path(__file__).parents[2] / config['epoch_PB_data'])
-
+                path3 = str(Path(__file__).parents[2] / config['epoch_IMU_data'])
+                
                 # Concatenate the data corresponding to all trials types
-                EMG_array, PB_array, y_array = convert_test_trials_to_array(subject, path1, path2, trial, config)
+                EMG_array, PB_array, IMU_array, y_array = convert_test_trials_to_array(subject, path1, path2, path3, trial, config)
                 
                 EMG_temp.append(EMG_array)
                 PB_temp.append(PB_array)
+                IMU_temp.append(IMU_array)
                 y_temp.append(y_array)
-
         # Convert to array
         EMG_temp = np.concatenate(EMG_temp, axis=0)
         PB_temp  = np.concatenate(PB_temp, axis=0)
+        IMU_temp = np.concatenate(IMU_temp, axis=0)
         y_temp   = np.concatenate(y_temp, axis=0)
 
         # Append to the big dataset
         features_dataset['subject_' + subject]['EMG'] = np.float32(EMG_temp)
         features_dataset['subject_' + subject]['PB'] = np.float32(PB_temp)
+        features_dataset['subject_' + subject]['IMU'] = np.float32(IMU_temp)
         features_dataset['subject_' + subject]['labels'] = np.float32(y_temp)
 
     return features_dataset
@@ -399,13 +432,13 @@ def clean_combined_data_for_fatigue_study(subjects, trials, n_class, config):
                 PB_temp.append(PB_array)
                 y_temp.append(y_array)
         else:
-
             for trial in trials:
                 path1 = str(Path(__file__).parents[2] / config['epoch_emg_data'])
                 path2 = str(Path(__file__).parents[2] / config['epoch_PB_data'])
-
+                path3 = str(Path(__file__).parents[2] / config['epoch_IMU_data'])
+                
                 # Concatenate the data corresponding to all trials types
-                EMG_array, PB_array, y_array = convert_test_trials_to_array(subject, path1, path2, trial, config)
+                EMG_array, PB_array, _, y_array = convert_test_trials_to_array(subject, path1, path2, path3, trial, config)
                 
                 EMG_temp.append(EMG_array)
                 PB_temp.append(PB_array)
@@ -456,9 +489,10 @@ def clean_intersession_test_data(subjects, trials, n_class, config):
             for trial in config['trials']:
                 path1 = str(Path(__file__).parents[2] / config['epoch_emg_data'])
                 path2 = str(Path(__file__).parents[2] / config['epoch_PB_data'])
-
+                path3 = str(Path(__file__).parents[2] / config['epoch_IMU_data'])
+                
                 # Concatenate the data corresponding to all trials types
-                EMG_array, PB_array, y_array = convert_test_trials_to_array(subject, path1, path2, trial, config)
+                EMG_array, PB_array, _, y_array = convert_test_trials_to_array(subject, path1, path2, path3, trial, config)
                 
                 EMG_temp.append(EMG_array)
                 PB_temp.append(PB_array)
@@ -529,21 +563,16 @@ def clean_correction_data(subjects, trials, n_class, config):
 
                 loaded_data[trial] = created_data
         else:
-            if config['test_all_trials']:
-                use_trials = config['trials']
-            elif config['test_comb_trials']:
-                use_trials = config['comb_trials']
-            else:
-                use_trials = set(config['trials']) - set(config['comb_trials'])
 
-            for trial in use_trials:
+            for trial in trials:
                 created_data = collections.defaultdict()
 
                 path1 = str(Path(__file__).parents[2] / config['epoch_emg_data'])
                 path2 = str(Path(__file__).parents[2] / config['epoch_PB_data'])
-
+                path3 = str(Path(__file__).parents[2] / config['epoch_IMU_data'])
+                
                 # Concatenate the data corresponding to all trials types
-                EMG_array, PB_array, y_array = convert_test_trials_to_array(subject, path1, path2, trial, config)
+                EMG_array, PB_array, _, y_array = convert_test_trials_to_array(subject, path1, path2, path3, trial, config)
                 
                 created_data['EMG'] = EMG_array
                 created_data['PB'] = PB_array
@@ -610,7 +639,7 @@ def balance_correction_data(data, trials, subjects, config, balance=True):
         min_ind = find_balancing_cutoff_index(data['subject_'+subject], trials)
         
         for trial in trials:
-            if balance and subject not in config['test_subjects']:
+            if (balance) and (subject not in config['test_subjects']):
                 if (config['n_class'] == 3 and trial == 'HighGross') or (config['n_class'] == 3 and trial == 'LowFine'):
                     ind = int((min_ind - 1) / 2)
                 else:

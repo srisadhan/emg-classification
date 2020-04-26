@@ -2,6 +2,7 @@ import numpy as np
 import deepdish as dd
 from pathlib import Path
 import collections
+from numba import jit
 
 import pysiology
 from sampen import sampen2, normalize_data
@@ -9,6 +10,7 @@ from sampen import sampen2, normalize_data
 from sklearn import preprocessing
 from sklearn.metrics import confusion_matrix
 from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import cross_val_score, KFold
 from imblearn.under_sampling import RandomUnderSampler
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
@@ -39,42 +41,29 @@ def sampEntropy(rawEMGSignal):
 
     return feature_value
 
-def extract_emg_features(config, sort_channels):
+# @jit(nopython=True)
+def extract_emg_features(data, config, scale=False):
     """ Load the EMG data and extract the features
     Parameters
     ----------
+    data : dictionary
+        epoched emg data
     config : yaml
         configuration file
-    sort_channels : bool
-        sort the channels according to the highest activity observed (high variance)
+    scale : bool
+        use min-max scaling if scale=True
+        
     Return
     ------
     Data : dictionary
         dictionary of feature and label data from all the subjects
     """
-    if sort_channels:
-        path = str(Path(__file__).parents[2] / config['emg_channel_order'])
-        channel_order = dd.io.load(path)
 
-    Data = collections.defaultdict(dict)
-    # load the data from the path
-    if config['n_class'] == 3:
-        save_path = Path(__file__).parents[2] / config['clean_emg_data_3class']
-    elif config['n_class'] == 4:
-        save_path = Path(__file__).parents[2] / config['clean_emg_data_4class']
-        
-    data = dd.io.load(str(save_path))
+    Data = collections.defaultdict(dict)    
 
     for subject in config['subjects']:
-
-        emg_vec    = data['subject_'+subject]['features']
+        emg_vec    = data['subject_'+subject]['EMG']
         labels     = data['subject_'+subject]['labels']
-
-        # coverting one hot encoding back to class labels
-        # if config['n_class'] == 3:
-        labels     = np.sum( np.multiply(np.array(np.arange(1, config['n_class']+1),ndmin=2) , labels) , axis=1)
-        # elif config['n_class'] == 4:
-        #     labels     = np.sum( np.multiply(np.array([1,2,3,4],ndmin=2) , labels) , axis=1)
 
         # A 3d array with dimensions representing trial_samples x emg_channels x epochs
         data_shape = emg_vec.shape
@@ -99,34 +88,11 @@ def extract_emg_features(config, sort_channels):
 
                 # features[i,6*j+5]   = sampen2(normalize_data(copy_rawEMGSignal))[2][1] # m = 2, r = 0.2 * std
 
-        # Min-Max scaling
-        min_max_scaler = preprocessing.MinMaxScaler()
-        features1      = min_max_scaler.fit_transform(features1)
-        features2      = min_max_scaler.fit_transform(features2)
-
-        if sort_channels:
-            # load the channel sort order
-            emg_order   = channel_order['subject_'+subject]['channel_order']
-
-            # initialize the feature order array
-            feat1_order = np.zeros(config['n_electrodes'] * config['n_features'])
-            feat2_order = np.zeros(config['n_electrodes'] * (config['n_features'] - 1))
-            # iterate through all the 8 channels to properly fit in features
-            for chan in range(0,8):
-                feat1_order[4*chan]   = 4*emg_order[chan]
-                feat1_order[4*chan+1] = 4*emg_order[chan]+1
-                feat1_order[4*chan+2] = 4*emg_order[chan]+2
-                feat1_order[4*chan+3] = 4*emg_order[chan]+3
-
-                feat2_order[3*chan]   = 3*emg_order[chan]
-                feat2_order[3*chan+1] = 3*emg_order[chan]+1
-                feat2_order[3*chan+2] = 3*emg_order[chan]+2
-
-            feat1_order = feat1_order.astype(int)
-            feat2_order = feat2_order.astype(int)
-
-            features1 = features1[:,feat1_order[:]]
-            features2 = features2[:,feat2_order[:]]
+        if scale:
+            # Min-Max scaling
+            min_max_scaler = preprocessing.MinMaxScaler()
+            features1      = min_max_scaler.fit_transform(features1)
+            features2      = min_max_scaler.fit_transform(features2)
 
         Data['subject_'+subject]['features1'] = features1
         Data['subject_'+subject]['features2'] = features2
@@ -135,13 +101,14 @@ def extract_emg_features(config, sort_channels):
 
     return Data
 
-def pool_subject_emg_features(config):
+def pool_subject_emg_features(data, subjects, config):
     """ Pool the data from all the subjects together
     Parameters
     ----------
     config : yaml
         configuration file
-
+    subjects: list
+        list of strings consisting of subject identifiers
     Return
     ------
     X1_data : array
@@ -152,10 +119,7 @@ def pool_subject_emg_features(config):
         An array of true labels.
     """
 
-    path = str(Path(__file__).parents[2] / config['subject_emg_features'])
-    data = dd.io.load(path)
-
-    for subject in config['subjects']:
+    for subject in subjects:
         # concatenate array to X_data if it exist, otherwise initialize X_data with the values
         if 'X1_data' in locals():
             X1_data = np.concatenate((X1_data, data['subject_'+subject]['features1']),axis=0)
@@ -239,6 +203,27 @@ def lda_cross_validated_pooled_emg_features(X, Y, config):
     """
 
     clf = LinearDiscriminantAnalysis(solver='svd')
+    scores = cross_val_score(clf, X, Y, cv=KFold(5, shuffle=True))
+
+    print('5-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))
+    
+
+def RF_cross_validated_pooled_emg_features(X, Y, config):
+    """ Load the EMG data and extract the features
+    Parameters
+    ----------
+    X      :  array
+        array of features
+    Y      : array
+        array of labels
+    config : yaml
+        configuration file
+
+    Returns
+    -------
+    """
+
+    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
     scores = cross_val_score(clf, X, Y, cv=KFold(5, shuffle=True))
 
     print('5-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))

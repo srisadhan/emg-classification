@@ -107,7 +107,7 @@ def subject_pooled_EMG_data(subjects, path, config):
     return features, labels, tags
 
 
-def subject_pooled_EMG_PB_data(subjects, path, config):
+def subject_pooled_EMG_PB_IMU_data(subjects, path, config):
     """Get subject independent data (pooled data).
 
     Parameters
@@ -130,23 +130,27 @@ def subject_pooled_EMG_PB_data(subjects, path, config):
 
     # Empty array (list)
     emg = []
-    pb = []
+    pb  = []
+    imu = []
     y = []
     # tags = np.empty((0, 1))
 
     for subject in subjects:
         emg_temp = data['subject_' + subject]['EMG']
         pb_temp  = data['subject_' + subject]['PB']
+        imu_temp = data['subject_' + subject]['IMU']
         y_temp  = data['subject_' + subject]['labels']
         
         emg.append(emg_temp)
         pb.append(pb_temp)
+        imu.append(imu_temp)
         y.append(y_temp)
         # tags = np.concatenate((tags, y_temp[:, 0:1] * 0 + 1), axis=0)
 
     # Convert to array
     emg = np.concatenate(emg, axis=0)
     pb  = np.concatenate(pb, axis=0)
+    imu = np.concatenate(imu, axis=0)
     y   = np.concatenate(y, axis=0)
 
     # # uncomment the following line if you want to balance the data before splitting
@@ -159,7 +163,7 @@ def subject_pooled_EMG_PB_data(subjects, path, config):
     # pb = pb[rus.sample_indices_, :]
     # y = y[rus.sample_indices_, :]
 
-    return emg, pb, y
+    return emg, pb, imu, y
 
 
 def subject_dependent_data(path, config):
@@ -273,7 +277,7 @@ def split_pooled_EMG_PB_data_train_test(subjects, path, config):
     testing_data = {}
 
     # pool the data
-    features_emg, pb, labels = subject_pooled_EMG_PB_data(subjects, path, config)
+    features_emg, pb, _, labels = subject_pooled_EMG_PB_IMU_data(subjects, path, config)
     # print("Total pooled data: %f" %(labels.shape[0]))
 
     pos = pb[:,2:4,:].mean(axis=2)

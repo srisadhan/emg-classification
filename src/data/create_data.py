@@ -3,14 +3,15 @@ from datetime import datetime
 from pathlib import Path
 
 import mne
-from mne.datasets import sample
 import numpy as np
 import pandas as pd
 import deepdish as dd
 import sys
 import math
+from mne.datasets import sample
+from sklearn.decomposition import PCA
 
-def get_trial_path(subject, trial, config, robot=False):
+def get_trial_path(subject, trial, config, sensor):
     """Get the trail path for a given subject and trial.
 
     Parameters
@@ -21,16 +22,16 @@ def get_trial_path(subject, trial, config, robot=False):
         A trail e.g. HighFine..
     config : yaml
         The configuration file.
-    robot : bool
-        To get robot path or emg path
-
+    sensor : string
+        string representing the type of file to be retrieved. For eg. 'EMG', 'PB', 'IMU'
+        
     Returns
     -------
     str
         A str specifying the path to the data.
 
     """
-    if robot:
+    if sensor == 'PB':
         # Trial time
         path = Path(__file__).parents[2] / config['force_data_path'] / subject
         for file in path.iterdir():
@@ -39,8 +40,7 @@ def get_trial_path(subject, trial, config, robot=False):
                 break
         trial_path = file
 
-    else:
-
+    elif sensor == 'EMG':
         # Trial time
         path = Path(__file__).parents[2] / config['raw_emg_path'] / subject
         for file in path.iterdir():
@@ -49,6 +49,15 @@ def get_trial_path(subject, trial, config, robot=False):
                 break
         trial_path = file
 
+    elif sensor == 'IMU':
+        # Trial time
+        path = Path(__file__).parents[2] / config['raw_emg_path'] / subject
+        for file in path.iterdir():
+            file_name = file.name.split('-')
+            if file_name[0].lower() == 'accelerometer':
+                break
+        trial_path = file
+        
     return trial_path
 
 
@@ -88,7 +97,7 @@ def get_trial_time(subject, trial, config):
                                 skip_header=config['skip_header']).tolist()
 
     # Get EMG time
-    trial_path = get_trial_path(subject, trial, config)
+    trial_path = get_trial_path(subject, trial, config, 'EMG')
     time_data = np.genfromtxt(trial_path,
                             dtype=str,
                             delimiter=',',
@@ -140,7 +149,7 @@ def get_raw_emg(subject, trial, config):
 
     """
     # Get trail path
-    trial_path = get_trial_path(subject, trial, config)
+    trial_path = get_trial_path(subject, trial, config, 'EMG')
 
     # Get the EMG data
     emg_data = np.genfromtxt(trial_path,
@@ -280,15 +289,15 @@ def get_raw_emg_exp2(subject, trial, config):
     # if subject in config['subjects2']:
     #     trial_path = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'PB.csv'
     # else:
-    #     trial_path = get_trial_path(subject, trial, config, robot=True)
+    #     trial_path = get_trial_path(subject, trial, config, 'PB')
 
     # path of the files
     # if subject in config['subjects2']:
     PB_path  = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'PB.csv'
     EMG_path = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'EMG.csv'
     # else:
-    #     PB_path  = get_trial_path(subject, trial, config, robot=True)
-    #     EMG_path = get_trial_path(subject, trial, config)
+    #     PB_path  = get_trial_path(subject, trial, config, 'PB')
+    #     EMG_path = get_trial_path(subject, trial, config, 'EMG')
 
     # path of the EMG file
     filepath = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial
@@ -578,7 +587,7 @@ def get_robot_data(subject, trial, config):
         A numpy array containing  total_force, velocity
 
     """
-    trial_path = get_trial_path(subject, trial, config, robot=True)
+    trial_path = get_trial_path(subject, trial, config, 'PB')
     data = np.genfromtxt(trial_path,
                          dtype=float,
                          delimiter=',',
@@ -636,8 +645,8 @@ def get_PB_data(subject, trial, config):
         EMG_path = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'EMG.csv'
     else:
         if trial not in config['comb_trials']:
-            PB_path  = get_trial_path(subject, trial, config, robot=True)
-            EMG_path = get_trial_path(subject, trial, config)
+            PB_path  = get_trial_path(subject, trial, config, 'PB')
+            EMG_path = get_trial_path(subject, trial, config, 'EMG')
     
     # read the data
     PB_data = np.genfromtxt(PB_path,
@@ -661,6 +670,8 @@ def get_PB_data(subject, trial, config):
     # Calculate the forces in the tangential and the normal directions
     PB_data = tangential_normal_force_components(PB_data)
 
+    PB_data = PCA_force_components(PB_data, wind_len=4)
+    
     # get the actual trial start and end time based on the PB and MYO data
     if subject in config['subjects2']:
         trial_start, trial_end, _ = get_trial_time_exp2(subject, trial, PB_path, EMG_path, config)
@@ -677,7 +688,7 @@ def get_PB_data(subject, trial, config):
     
     
     # creating an mne object
-    info = mne.create_info(ch_names=['Fx', 'Fy', 'X', 'Y', 'Ft', 'Fn'], sfreq=sfreq, ch_types=['misc'] * 6)
+    info = mne.create_info(ch_names=['Fx', 'Fy', 'X', 'Y', 'Ft', 'Fn', 'F_pca1', 'F_pca2'], sfreq=sfreq, ch_types=['misc'] * 8)
     raw = mne.io.RawArray(PB_data, info, verbose=False)
 
     return raw, time_data
@@ -812,7 +823,36 @@ def create_PB_epoch(subjects, trials, config):
 
     return data_epochs
 
+def PCA_force_components(data, wind_len=10):
+    """Perform the PCA on the history of points to capture the 
+    dominant directions of the force and project the force data 
+    in that direction
 
+    Parameters
+    ----------
+    data : nd-array
+        force and position data from the robot
+    wind_len : int, optional
+        wind_len to consider the history of points, by default 4
+    
+    Return
+    ------
+    data : nd-array
+        data concatenated to the array
+    """        
+    force_xy    = data[0:2,:]
+
+    force_PCA   = np.zeros(force_xy.shape)
+    pca = PCA(copy=True, whiten=False, svd_solver='auto', tol=0.0, iterated_power='auto', random_state=None)
+    
+    for i in range(force_xy.shape[0]):
+        if i < wind_len:
+            force_PCA[i, :] = force_xy[i, :]
+        else:
+            force_PCA[i, :] = pca.fit(force_xy[i-wind_len:i+1,:]).transform(force_xy[i,:])
+
+    return(np.concatenate((data[:,:], force_PCA[:,:]), axis=0))
+    
 def tangential_normal_force_components(data):
     """Calculates the tangential and the normal components of the force
 
@@ -825,7 +865,7 @@ def tangential_normal_force_components(data):
     force_xy    = data[0:2,:]
     pos_xy      = data[2:4,:]
 
-    for i in range(2, pos_xy.shape[0]-2):
+    for i in range(5, pos_xy.shape[0]):
         #FIXME: I should not be using this because I don't have future information
         # pos_xy[i,0] = np.ma.average(pos_xy[i-2:i+3, 0])
         # pos_xy[i,1] = np.ma.average(pos_xy[i-2:i+3, 1])
@@ -885,3 +925,198 @@ def angle_between(v1, v2):
     v1_u = unit_vector(v1)
     v2_u = unit_vector(v2)
     return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+
+
+def get_IMU_data(subject, trial, config):
+    """Get the force and position data of a subject and a trial.
+
+    Parameters
+    ----------
+    subject : str
+        A string of subject ID e.g. 7707.
+    trial : str
+        A trail e.g. HighFine..
+    config : yaml
+        The configuration file.
+    Returns
+    ----------
+    robot_data : array
+        A numpy array containing  total_force
+
+    """
+    # path of the files
+    if subject in config['subjects2']:
+        IMU_path  = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'IMU.csv'
+        EMG_path = Path(__file__).parents[2] / config['exp2_data_path'] / subject / trial / 'EMG.csv'
+        cols = [5,6,7]
+    else:
+        if trial not in config['comb_trials']:
+            IMU_path  = get_trial_path(subject, trial, config, 'IMU')
+            EMG_path = get_trial_path(subject, trial, config, 'EMG')    
+            cols = [1,2,3]
+    
+    # read the data
+    IMU_data = np.genfromtxt(IMU_path,
+                            dtype=float,
+                            delimiter=',',
+                            unpack=True,
+                            usecols=cols, # Ax, Ay, Az
+                            skip_footer=config['skip_footer'],
+                            skip_header=config['skip_header'])
+    time_data = np.genfromtxt(IMU_path,
+                            dtype=str,
+                            delimiter=',',
+                            unpack=True,
+                            usecols=0,
+                            skip_footer=config['skip_footer'],
+                            skip_header=config['skip_header'])
+
+    # get the actual trial start and end time based on the PB and MYO data
+    if subject in config['subjects2']:
+        trial_start, trial_end, _ = get_trial_time_exp2(subject, trial, IMU_path, EMG_path, config)
+        time_data, sfreq = convert_time(time_data)
+        indices = np.all([time_data >= trial_start, time_data <= trial_end], axis=0)
+
+        time_data = time_data[indices[:,0]]
+        # only normalize the IMU data for subjects in the subjects2 list, Amir's data is already normalized
+        IMU_data  = IMU_data[:,indices[:,0]] / config['IMUAccScale'] 
+
+    else:
+        trial_start, trial_end, _ = get_trial_time(subject, trial, config)
+        sfreq = 50 # 50 Hz for the IMU data
+    # creating an mne object
+    info = mne.create_info(ch_names=['Ax', 'Ay', 'Az'], sfreq=sfreq, ch_types=['misc'] * 3)
+    raw = mne.io.RawArray(IMU_data, info, verbose=False)
+
+    return raw, time_data
+
+
+def create_IMU_data(subjects, trials, config):
+    """Create the IMU data with each subject data in a dictionary.
+
+    Parameter
+    ----------
+    subject : list
+        String of subject ID e.g. 7707
+    error_type : list
+        Types of trials i.e., e.g. HighFine.
+    config : yaml
+        The configuration file
+
+    Returns
+    ----------
+    dict
+        A data (dict) of all the subjects with different conditions
+        data['PB'] = Fx, Fy, X, Y, Ft, Fn
+    """
+    IMU_data = {}
+    # Loop over all subjects and error types
+    for subject in subjects:
+        data = collections.defaultdict(dict)
+
+        if subject not in config['test_subjects']:
+            for trial in (set(config['trials']) - set(config['comb_trials'])):
+                raw_data, time = get_IMU_data(subject, trial, config)   
+                data['IMU'][trial] = raw_data
+                data['time'][trial] = time
+        else:
+            # for trial in config['comb_trials']:
+            for trial in config['trials']:
+                raw_data, time = get_IMU_data(subject, trial, config)   
+                data['IMU'][trial] = raw_data
+                data['time'][trial] = time
+
+
+        IMU_data['subject_' + subject] = data
+        
+    return IMU_data
+
+
+def get_IMU_epoch(subject,raw_data, config):
+    """Create the epoch data from raw data.
+
+    Parameter
+    ----------
+    subject : string
+        String of subject ID e.g. 7707
+    raw_emg : mne raw object
+        data structure of raw_emg
+    config : yaml
+        The configuration file
+
+    Returns
+    ----------
+    mne epoch data
+        A data (dict) of all the subjects with different conditions
+
+    """
+    # Parameters
+    epoch_length = config['epoch_length']
+    overlap = config['overlap']
+    
+    raw_cropped = raw_data.copy().resample(config['sfreq_IMU'], npad='auto', verbose='error')
+
+    events = mne.make_fixed_length_events(raw_cropped,
+                                          duration=epoch_length,
+                                          overlap=epoch_length * overlap)
+    epochs = mne.Epochs(raw_cropped,
+                        events,
+                        tmin=0,
+                        tmax=config['epoch_length'],
+                        baseline=None,
+                        verbose=False)
+    return epochs
+
+
+def create_IMU_epoch(subjects, trials, config):
+    """Create the data with each subject data in a dictionary.
+
+    Parameter
+    ----------
+    subject : list
+        String of subject ID e.g. 7707
+    error_type : list
+        Types of trials i.e., e.g. HighFine.
+    config : yaml
+        The configuration file
+
+    Returns
+    ----------
+    dict
+        A data (dict) of all the subjects with different conditions
+
+    """
+
+    # Empty dictionary
+    data_epochs = {}
+
+    # Load the data
+    read_path = Path(__file__).parents[2] / config['raw_IMU_data']
+    data = dd.io.load(str(read_path))
+
+    # Loop over all subjects and error types
+    for subject in subjects:
+        temp = collections.defaultdict(dict)
+
+        if subject not in config['test_subjects']:
+            for trial in (set(config['trials']) - set(config['comb_trials'])):
+                raw_data = data['subject_' + subject]['IMU'][trial]
+                time = data['subject_' + subject]['time'][trial]
+
+                # Create epoch data
+                temp['IMU'][trial] = get_IMU_epoch(subject, raw_data, config)
+                temp['time'][trial] = time
+        else:
+            # for trial in config['comb_trials']:
+            for trial in config['trials']:
+                raw_data = data['subject_' + subject]['IMU'][trial]
+                time = data['subject_' + subject]['time'][trial]
+
+                # Create epoch data
+                temp['IMU'][trial] = get_IMU_epoch(subject, raw_data, config)
+                temp['time'][trial] = time
+
+        data_epochs['subject_' + subject] = temp
+
+    return data_epochs
+
