@@ -356,7 +356,7 @@ def pooled_data_SelfCorrect_NN(data, clf, config):
     rus.fit_resample(labels_train, labels_train)
     features_train = features_train[rus.sample_indices_, :]
     labels_train = labels_train[rus.sample_indices_, :]
-
+    
     # Get training, validation, and testing ids_list
     ids_list = data_split_ids(labels_train, test_size=TEST_SIZE)
 

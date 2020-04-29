@@ -183,9 +183,9 @@ def svm_cross_validated_pooled_emg_features(X, Y, config):
     """
 
     clf  = SVC(C=1.0, kernel='rbf', gamma='auto', decision_function_shape='ovr')
-    scores = cross_val_score(clf, X, Y, cv=KFold(5, shuffle=True))
+    scores = cross_val_score(clf, X, Y, cv=KFold(10, shuffle=True))
 
-    print('5-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))
+    print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))
 
 def lda_cross_validated_pooled_emg_features(X, Y, config):
     """ Load the EMG data and extract the features
@@ -203,9 +203,9 @@ def lda_cross_validated_pooled_emg_features(X, Y, config):
     """
 
     clf = LinearDiscriminantAnalysis(solver='svd')
-    scores = cross_val_score(clf, X, Y, cv=KFold(5, shuffle=True))
+    scores = cross_val_score(clf, X, Y, cv=KFold(10, shuffle=True))
 
-    print('5-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))
+    print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))
     
 
 def RF_cross_validated_pooled_emg_features(X, Y, config):
@@ -224,6 +224,6 @@ def RF_cross_validated_pooled_emg_features(X, Y, config):
     """
 
     clf = RandomForestClassifier(n_estimators=100, oob_score=True)
-    scores = cross_val_score(clf, X, Y, cv=KFold(5, shuffle=True))
+    scores = cross_val_score(clf, X, Y, cv=KFold(10, shuffle=True))
 
-    print('5-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))
+    print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))

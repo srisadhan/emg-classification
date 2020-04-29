@@ -92,20 +92,22 @@ def train_correction_network(network, config, data):
 
     # Loss and optimizer
     criterion = nn.CrossEntropyLoss()
+    # criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config['LEARNING_RATE'])
     
     # visual logger 
     visual_logger1 = visual_log('Task type classification using self-correction')
-    # visual_logger2 = VisdomPlotLogger('line', 
-                                    # opts=dict(xlabel='Epochs',
-                                    #     ylabel='Error',
-                                    #     title='Error plot'))
+    visual_logger2 = VisdomPlotLogger('line', 
+                                    opts=dict(xlabel='Epochs',
+                                        ylabel='Error',
+                                        title='Error plot'))
     accuracy_log  = []
 
     for epoch in range(config['NUM_EPOCHS']):
         for x_batch, y_batch in data['training']:
             
             x_batch = x_batch.to(device)
+            # y_batch = y_batch.to(device) # use this while using MSELoss() otherwise use below
             y_batch = (torch.max(y_batch, dim=1)[1]).to(device) #convert labels from one hot encoding to normal
 
             # Forward propagation
@@ -124,7 +126,7 @@ def train_correction_network(network, config, data):
         visual_logger1.log(epoch, [accuracy[0], accuracy[1], accuracy[2]])
 
         # log the errors
-        # visual_logger2.log(epoch, loss)
+        visual_logger2.log(epoch, loss.item())
 
     # Add loss function info to parameter.
     model_info = create_model_info(config, str(criterion),

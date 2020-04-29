@@ -8,7 +8,7 @@ Fs:                   200
 sfreq:                200
 sfreq2:               150 # sampling frequency of EMG in the exp 2   
 sfreq_IMU:            50
-overlap:              0.50
+overlap:              0
 n_features:           4
 threshold:            10 # from the Ninapro suggestion
 IMUAccScale:          2048
@@ -44,10 +44,10 @@ pool_comb_task_data : False # pool the combined task into rest of the data for c
 print_dist_between_mean_covs : True # print the distance between all possible class covariance matrices.
 ##---------------------------------------------------------------------##
 # subjects : list of all the subjects (amir and my exp); subjects2 : list of subjects from my exp; test_subjects: list of subjects used for testing the classifier
-subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820', '8821', '8822', '8823', '8824', '9001_1',  '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9005_2', '9006_2', '9007_2'] #, '9002_1', '9003_1'] #, '9002_2', '9003_2', '9011_2']
+subjects:             ['7707', '7708', '8801', '8802','8803', '8815', '8819', '8820', '8821', '8822', '8823', '8824', '9001_1',  '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9005_2', '9006_2', '9007_2', '9002_1', '9003_1', '9002_2', '9003_2'] #, '9011_2']
 subjects2:            ['9001_1', '9002_1', '9003_1', '9004_1', '9005_1', '9006_1', '9007_1', '9010_1', '9011_1', '9002_2', '9003_2', '9005_2', '9006_2', '9007_2'] #, '9011_2']
-test_subjects:        ['9005_2', '9006_2', '9007_2'] #'9002_2', '9003_2', '9011_2'] # 9011_2 does not have HF, HG, LF, LG
-train_subjects:       ['9005_1', '9006_1', '9007_1'] #'9002_1', '9003_1', '9011_1'
+test_subjects:        ['9005_2', '9006_2', '9007_2', '9002_2', '9003_2'] #, '9011_2'] # 9011_2 does not have HF, HG, LF, LG
+train_subjects:       ['9005_1', '9006_1', '9007_1', '9002_1', '9003_1'] #, '9011_1'
 trials:               ['HighFine', 'LowGross', 'HighGross', 'LowFine', 'HighComb', 'LowComb']
 comb_trials:          ['HighComb', 'LowComb']
 test_all_trials:      False    # Test the accuracy of the classifier on all the 6 trails

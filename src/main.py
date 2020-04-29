@@ -47,7 +47,7 @@ from models.riemann_models import (tangent_space_classifier,
 from models.statistical_models import mixed_effect_model
 from models.torch_models import train_torch_model, train_correction_network
 from models.torch_networks import ShallowERPNet, ShallowCorrectionNet
-from sklearn.model_selection import cross_val_score, KFold
+from sklearn.model_selection import cross_val_score, KFold, train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.svm import SVC, SVR 
 from sklearn.ensemble import RandomForestClassifier
@@ -117,6 +117,20 @@ with skip_run('skip', 'create_PB_epoch') as check, check():
     path = Path(__file__).parents[1] / config['epoch_PB_data']
     dd.io.save(str(path), data)
     
+with skip_run('skip', 'create_IMU_data_epoch_clean') as check, check():
+    data = create_IMU_data(config['subjects'], config['trials'], config)
+    # save the data
+    path = Path(__file__).parents[1] / config['raw_IMU_data']
+    save_data(str(path), data, True)
+    
+    data = create_IMU_epoch(config['subjects'], config['trials'], config)
+    # save the data
+    path = Path(__file__).parents[1] / config['epoch_IMU_data']
+    dd.io.save(str(path), data)
+    
+    data = clean_epoch_data(config['subjects'], config['trials'], 'IMU', config)
+    save_data(str(Path(__file__).parents[1] / config['clean_IMU_data']), data, save=True)
+
 with skip_run('skip', 'clean_emg_epoch') as check, check():
     data = clean_epoch_data(config['subjects'], config['trials'], 'EMG', config)
     
@@ -137,20 +151,6 @@ with skip_run('skip', 'clean_PB_epoch') as check, check():
     elif config['n_class'] == 4:
         save_path = Path(__file__).parents[1] / config['clean_PB_data_4class']
     save_data(str(save_path), data, save=True)
-
-with skip_run('skip', 'create_IMU_data_epoch_clean') as check, check():
-    data = create_IMU_data(config['subjects'], config['trials'], config)
-    # save the data
-    path = Path(__file__).parents[1] / config['raw_IMU_data']
-    save_data(str(path), data, True)
-    
-    data = create_IMU_epoch(config['subjects'], config['trials'], config)
-    # save the data
-    path = Path(__file__).parents[1] / config['epoch_IMU_data']
-    dd.io.save(str(path), data)
-    
-    data = clean_epoch_data(config['subjects'], config['trials'], 'IMU', config)
-    save_data(str(Path(__file__).parents[1] / config['clean_IMU_data']), data, save=True)
 
 with skip_run('skip', 'save_EMG_PB_IMU_data') as check, check():
     
@@ -335,18 +335,18 @@ with skip_run('skip', 'sort_order_emg_channels') as check, check():
     path = str(Path(__file__).parents[1] / config['emg_channel_order'])
     save_data(path,data,save=True)
 
-with skip_run('skip', 'extract_emg_features') as check, check():
+with skip_run('run', 'extract_emg_features') as check, check():
     # path to save
     path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
     data = dd.io.load(path)
 
-    data = extract_emg_features(data, config, scale=True)
+    data = extract_emg_features(data, config, scale=False)
 
     # save the data in h5 format
     path = str(Path(__file__).parents[1] / config['subject_emg_features'])
     save_data(path,data,save=True)
 
-with skip_run('skip', 'pool_subject_emg_features') as check, check():
+with skip_run('run', 'pool_subject_emg_features') as check, check():
 
     path = str(Path(__file__).parents[1] / config['subject_emg_features'])
     data = dd.io.load(path)
@@ -362,7 +362,7 @@ with skip_run('skip', 'pool_subject_emg_features') as check, check():
     path = str(Path(__file__).parents[1] / config['pooled_emg_features'])
     save_data(path,data,save=True)
 
-with skip_run('skip', 'SVM_RF_cross_validated_balanced_emg_features') as check, check():
+with skip_run('run', 'SVM_RF_cross_validated_balanced_emg_features') as check, check():
     X1_res, X2_res, Y_res = balance_pooled_emg_features(config)
 
     Y_res = np.argmax(Y_res, axis=1) + 1
@@ -396,18 +396,21 @@ with skip_run('skip', 'svm_lda_cross_validated_pooled_emg_features') as check, c
     lda_cross_validated_pooled_emg_features(X2, Y, config)
 
 # classifier transferability
-with skip_run('skip', 'inter-session classification using Hudgins features') as check, check():
+with skip_run('run', 'inter-session classification using Hudgins features') as check, check():
     train_subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
     test_subjects  = config['test_subjects']
     
     path = str(Path(__file__).parents[1] / config['subject_emg_features'])
     data = dd.io.load(path)
     
-    train_X, _, train_y = pool_subject_emg_features(data, train_subjects, config)
+    train_X, train_X2, train_y = pool_subject_emg_features(data, train_subjects, config)
+    
     rus = RandomUnderSampler()
     train_X, train_y = rus.fit_resample(train_X, train_y)
     
-    test_X, _, test_y = pool_subject_emg_features(data, test_subjects, config)
+    train_X2 = train_X2[rus.sample_indices_, :]
+
+    test_X, test_X2, test_y = pool_subject_emg_features(data, test_subjects, config)
     
     train_y = np.argmax(train_y, axis=1) + 1
     test_y = np.argmax(test_y, axis=1) + 1
@@ -422,7 +425,14 @@ with skip_run('skip', 'inter-session classification using Hudgins features') as 
     print('RF Inter-session accuracy Hudgins feature set: %f ' % (scores))
     
     scores = clf2.score(train_X, train_y)
-    print('Rf training accuracy: %f ' % (scores))
+    print('Rf training accuracy on feature set 1: %f ' % (scores))
+
+    scores = clf1.fit(train_X2, train_y).score(test_X2, test_y)
+    print('SVM Inter-session accuracy feature set2: %f ' % (scores))
+    
+    scores = clf2.fit(train_X2, train_y).score(test_X2, test_y)
+    print('RF Inter-session accuracy feature set2: %f ' % (scores))
+
     
 with skip_run('skip', 'classifier_transferability_across_subjects') as check, check():
     path = str(Path(__file__).parents[1] / config['subject_emg_features'])
@@ -517,7 +527,7 @@ with skip_run('skip', 'extract_force_features') as check, check():
 
 # -------------------- Classification --------------------- #
 ##-- Classification using Riemannian features--##
-with skip_run('skip', 'classify_using_riemannian_emg_features_cross_validate') as check, check():
+with skip_run('run', 'classify_using_riemannian_emg_features_cross_validate') as check, check():
     # Subject information
     # subjects = config['train_subjects']
     subjects = set(config['subjects']) ^ set(config['test_subjects'])
@@ -526,7 +536,7 @@ with skip_run('skip', 'classify_using_riemannian_emg_features_cross_validate') a
     elif config['n_class'] == 4:
         save_path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
     # Load main data
-    features, labels, _ = subject_pooled_EMG_data(subjects, save_path, config)
+    features, labels, leave_tags = subject_pooled_EMG_data(subjects, save_path, config)
 
     #FIXME:
     # ------------------Remove this later --------------------
@@ -539,6 +549,7 @@ with skip_run('skip', 'classify_using_riemannian_emg_features_cross_validate') a
     rus.fit_resample(y[:,np.newaxis], y[:,np.newaxis])
     X = X[rus.sample_indices_, :, :]
     y = y[rus.sample_indices_]
+    labels = labels[rus.sample_indices_, :]
     # -------------------------------------------------------
     # X   = features
     # y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
@@ -558,7 +569,7 @@ with skip_run('skip', 'classify_using_riemannian_emg_features_cross_validate') a
     #     V[i,:] = np.ravel(v, order ='F')
 
     # SVM classifier
-    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
     # Random forest classifier
     clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
     
@@ -577,12 +588,19 @@ with skip_run('skip', 'classify_using_riemannian_emg_features_cross_validate') a
     
     # save the model to disk
     filename = str(Path(__file__).parents[1] / config['saved_RF_classifier'])
-    joblib.dump(clf2, filename)
+    joblib.dump(clf1, filename)
 
     # Linear discriminant analysis - # does not provide good accuracy
     # clf3 = LinearDiscriminantAnalysis(solver='svd')
     # accuracy = cross_val_score(clf3, ts, y, cv=KFold(5,shuffle=True))
     # print("cross validation accuracy using LDA: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
+    
+    # Verify the accuracy using the train-test split
+    data = train_test_data(X, labels, leave_tags, config)
+
+    # Train the classifier and predict on test data
+    clf = tangent_space_classifier(data['train_x'], data['train_y'], 'rf')
+    tangent_space_prediction(clf, data['test_x'], data['test_y'])
 
 with skip_run('skip', 'classify_using_PCA_reduced_riemannian_emg_features_cross_validate') as check, check():
     # Subject information
@@ -910,7 +928,7 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
     print("Inter-subject tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
-with skip_run('skip', 'inter_session_transferability_using_riemannian_features') as check, check():
+with skip_run('run', 'inter_session_transferability_using_riemannian_features') as check, check():
     # Subject information
     subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
     # subjects_train = config['train_subjects']
@@ -947,7 +965,9 @@ with skip_run('skip', 'inter_session_transferability_using_riemannian_features')
     clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
 
     #####----- EMG covariance matrix and its projection in tangent space
-    print('*--------Accuracy reported from the EMG features')
+    # cov = Covariances().fit(train_emg)
+    # ts  = TangentSpace().fit(cov.transform(train_emg))
+
     train_cov = Covariances().fit_transform(train_emg)
     train_X   = TangentSpace().fit_transform(train_cov)
     
@@ -1106,7 +1126,7 @@ with skip_run('skip', 'inter_session_transferability_using_riemannian_features')
 
     # plt.show()
 
-with skip_run('skip', 'inter_task_transferability_using_riemannian_features') as check, check():
+with skip_run('run', 'inter_task_transferability_using_riemannian_features') as check, check():
     # Subject information
     # subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
     subjects_train = config['train_subjects']
@@ -2217,7 +2237,9 @@ with skip_run('skip', 'save_RF_classifier_to_train_correction_NN') as check, che
     ts = TangentSpace().fit_transform(covest)
 
     # Random forest classifier
-    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    # clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+    clf2 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+    
     
     accuracy = cross_val_score(clf2, ts, y, cv=KFold(10,shuffle=True))
     print("cross validation accuracy using RF: %0.4f (+/- %0.4f)" % (accuracy.mean(), accuracy.std() * 2))
@@ -2289,7 +2311,7 @@ with skip_run('skip', 'train_correction_classifier_output') as check, check():
         save_path = str(path)
         save_trained_pytorch_model(model, model_info, save_path, save_model=True)
 
-with skip_run('run', 'Correct_interSession_prediction_using_median') as check, check():
+with skip_run('skip', 'Correct_interSession_prediction_using_median') as check, check():
 
     # path to load the file
     filepath = str(Path(__file__).parents[1] / config['subject_data_pred_correction'])
@@ -2330,7 +2352,12 @@ with skip_run('run', 'Correct_interSession_prediction_using_median') as check, c
 
         for subject in config['test_subjects']:
             for trial in list(set(config['trials']) ^ set(config['comb_trials'])):
+                #FIXME: A separate covariance instance is not performing good
+                # temp_features = TangentSpace().fit_transform(Covariances().fit_transform(data['subject_' + subject][trial]['EMG']))
+
+                # covariance instance fit on the training data is good to be used on the testing data
                 temp_features = tspace.transform(cov.transform(data['subject_' + subject][trial]['EMG']))
+
                 temp_labels   = data['subject_' + subject][trial]['labels']
                 # print(subject, trial, RF_clf.score(temp_features, np.dot(temp_labels,np.array(np.arange(1, config['n_class']+1)))))
 
@@ -2359,7 +2386,7 @@ with skip_run('run', 'Correct_interSession_prediction_using_median') as check, c
     plt.xlabel('History of epochs used')
     plt.ylabel('Accuracy')
     plt.title('Inter-Session accuracy')
-    plt.show()
+    # plt.show()
     
 with skip_run('skip', 'Correct_interTask_prediction_using_median') as check, check():
     
@@ -2402,7 +2429,12 @@ with skip_run('skip', 'Correct_interTask_prediction_using_median') as check, che
 
         for subject in config['test_subjects']:
             for trial in config['comb_trials']:
-                temp_features = tspace.transform(cov.transform(test_data['subject_' + subject][trial]['EMG']))
+                 #FIXME: A separate covariance instance is performing good for inter-task unlike intersession
+                temp_features = TangentSpace().fit_transform(Covariances().fit_transform(test_data['subject_' + subject][trial]['EMG']))
+
+                # covariance instance fit on the training data is good to be used on the testing data
+                # temp_features = tspace.transform(cov.transform(test_data['subject_' + subject][trial]['EMG']))
+
                 temp_labels   = test_data['subject_' + subject][trial]['labels']
                 # print(subject, trial, RF_clf.score(temp_features, np.dot(temp_labels,np.array(np.arange(1, config['n_class']+1)))))
 
@@ -2432,7 +2464,7 @@ with skip_run('skip', 'Correct_interTask_prediction_using_median') as check, che
     plt.ylabel('Accuracy')
     plt.title('Inter-Task accuracy')
     
-    plt.show()
+    # plt.show()
 
 # Hierarchical classification approach
 with skip_run('skip', 'Hierarchical classification') as check, check():
@@ -2576,7 +2608,8 @@ with skip_run('skip', 'Some_crazy_little_Idea_hopeit_does_some_good') as check, 
 
         for subject in config['test_subjects']:
             for trial in list(set(config['trials']) ^ set(config['comb_trials'])):
-                temp_features = tspace.transform(cov.transform(data['subject_' + subject][trial]['EMG']))
+                temp_features = TangentSpace().fit_transform(Covariances().fit_transform(data['subject_' + subject][trial]['EMG']))
+                # temp_features = tspace.transform(cov.transform(data['subject_' + subject][trial]['EMG']))
                 temp_labels   = data['subject_' + subject][trial]['labels']
                 # print(subject, trial, RF_clf.score(temp_features, np.dot(temp_labels,np.array(np.arange(1, config['n_class']+1)))))
                 
@@ -2590,7 +2623,7 @@ with skip_run('skip', 'Some_crazy_little_Idea_hopeit_does_some_good') as check, 
                     corr_pred2.append(pred) 
                     total_test_categ.append(np.argmax(temp_labels[i, :]))
                     
-                    if (pred == 2) and ( RMS_array['subject_'+subject][trial][i,0] < 0.35):
+                    if (pred == 2) and ( RMS_array['subject_'+subject][trial][i,0] < 0.25):
                         curr_pred = 0
                     
                     act_pred.append(curr_pred)
@@ -2612,4 +2645,5 @@ with skip_run('skip', 'Some_crazy_little_Idea_hopeit_does_some_good') as check, 
     plt.xlabel('History of epochs used')
     plt.ylabel('Accuracy')
     plt.title('Inter-Session accuracy')
-    plt.show()
+    
+plt.show()
