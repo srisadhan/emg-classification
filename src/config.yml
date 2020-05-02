@@ -8,7 +8,7 @@ Fs:                   200
 sfreq:                200
 sfreq2:               150 # sampling frequency of EMG in the exp 2   
 sfreq_IMU:            50
-overlap:              0
+overlap:              0.5
 n_features:           4
 threshold:            10 # from the Ninapro suggestion
 IMUAccScale:          2048
@@ -96,4 +96,11 @@ tangent_feat_for_Dr_Ehsan:      'data/processed/EMG_features.mat'
 tangent_feat_for_Joe:           'data/processed/Riemannian_EMG_features.h5'
 saved_RF_classifier:            'data/processed/RF_classifier_saved_model.pkl'
 Self_correction_dataset:        'data/processed/dataset_self_correction_algorithm.h5'
+train_test_split_dataset:       'data/processed/train_test_split_data.h5'
+train_test_split_TD_features:   'data/processed/train_test_split_TD_features.h5'
+train_test_split_RM_features:   'data/processed/train_test_split_RM_features.h5'
+predicted_labels_train_test:    'data/processed/predicted_labels_train_test.csv'
+predicted_labels_inter_session: 'data/processed/predicted_labels_inter_session.csv'
+RM_features_subjectwise:        'data/processed/RM_features_subjectwise.h5'
+RM_features_orderly_pool:       'data/processed/RM_features_orderly_pool.h5'
 ##---------------------------------------------------------------------##

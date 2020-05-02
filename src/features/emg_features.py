@@ -89,6 +89,7 @@ def extract_emg_features(data, config, scale=False):
                 # features[i,6*j+5]   = sampen2(normalize_data(copy_rawEMGSignal))[2][1] # m = 2, r = 0.2 * std
 
         if scale:
+            # print('Min-Max scaling the emg-features')
             # Min-Max scaling
             min_max_scaler = preprocessing.MinMaxScaler()
             features1      = min_max_scaler.fit_transform(features1)
@@ -185,7 +186,7 @@ def svm_cross_validated_pooled_emg_features(X, Y, config):
     clf  = SVC(C=1.0, kernel='rbf', gamma='auto', decision_function_shape='ovr')
     scores = cross_val_score(clf, X, Y, cv=KFold(10, shuffle=True))
 
-    print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))
+    print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) * 2))
 
 def lda_cross_validated_pooled_emg_features(X, Y, config):
     """ Load the EMG data and extract the features
@@ -205,7 +206,7 @@ def lda_cross_validated_pooled_emg_features(X, Y, config):
     clf = LinearDiscriminantAnalysis(solver='svd')
     scores = cross_val_score(clf, X, Y, cv=KFold(10, shuffle=True))
 
-    print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))
+    print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) * 2 ))
     
 
 def RF_cross_validated_pooled_emg_features(X, Y, config):
@@ -226,4 +227,4 @@ def RF_cross_validated_pooled_emg_features(X, Y, config):
     clf = RandomForestClassifier(n_estimators=100, oob_score=True)
     scores = cross_val_score(clf, X, Y, cv=KFold(10, shuffle=True))
 
-    print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) ))
+    print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) * 2))

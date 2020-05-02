@@ -12,6 +12,7 @@ import torch
 import h5py
 import numpy as np
 from pathlib import Path
+import pandas as pd 
 
 from pyriemann.estimation import Covariances, Shrinkage, Coherences
 from pyriemann.tangentspace import TangentSpace, FGDA
@@ -26,7 +27,8 @@ from pyriemann.spatialfilters import SPoC, CSP
 from pathlib import Path
 import collections
 from data.clean_data import (clean_epoch_data, clean_combined_data, clean_intersession_test_data, 
-                            clean_combined_data_for_fatigue_study, clean_correction_data, balance_correction_data, pool_correction_data)
+                            clean_combined_data_for_fatigue_study, clean_correction_data, balance_correction_data, pool_correction_data,
+                            convert_to_array)
 from data.create_data import (create_emg_data, create_emg_epoch, create_PB_data,
                               create_PB_epoch, create_IMU_data, create_IMU_epoch,
                               create_robot_dataframe, sort_order_emg_channels)
@@ -47,15 +49,16 @@ from models.riemann_models import (tangent_space_classifier,
 from models.statistical_models import mixed_effect_model
 from models.torch_models import train_torch_model, train_correction_network
 from models.torch_networks import ShallowERPNet, ShallowCorrectionNet
-from sklearn.model_selection import cross_val_score, KFold, train_test_split
+from sklearn.model_selection import cross_val_score, KFold, train_test_split, TimeSeriesSplit
 from sklearn.pipeline import make_pipeline
-from sklearn.svm import SVC, SVR 
+from sklearn.svm import SVC, SVR, LinearSVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.decomposition import PCA
 from sklearn.feature_selection import SelectFromModel, RFE
 from sklearn.covariance import ShrunkCovariance
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.decomposition import TruncatedSVD
+from sklearn.pipeline import Pipeline
 
 from sklearn_hierarchical_classification.classifier import HierarchicalClassifier
 from sklearn_hierarchical_classification.constants import ROOT
@@ -335,23 +338,24 @@ with skip_run('skip', 'sort_order_emg_channels') as check, check():
     path = str(Path(__file__).parents[1] / config['emg_channel_order'])
     save_data(path,data,save=True)
 
-with skip_run('run', 'extract_emg_features') as check, check():
+with skip_run('skip', 'extract_emg_features') as check, check():
     # path to save
     path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
     data = dd.io.load(path)
 
-    data = extract_emg_features(data, config, scale=False)
+    data = extract_emg_features(data, config, scale=True)
 
     # save the data in h5 format
     path = str(Path(__file__).parents[1] / config['subject_emg_features'])
     save_data(path,data,save=True)
 
-with skip_run('run', 'pool_subject_emg_features') as check, check():
+with skip_run('skip', 'pool_subject_emg_features') as check, check():
 
     path = str(Path(__file__).parents[1] / config['subject_emg_features'])
     data = dd.io.load(path)
     
-    X1, X2, Y = pool_subject_emg_features(data, config['subjects'], config)
+    subjects = set(config['subjects']) ^ set(config['test_subjects'])
+    X1, X2, Y = pool_subject_emg_features(data, subjects, config)
 
     data = {}
     data['X1'] = X1
@@ -362,7 +366,7 @@ with skip_run('run', 'pool_subject_emg_features') as check, check():
     path = str(Path(__file__).parents[1] / config['pooled_emg_features'])
     save_data(path,data,save=True)
 
-with skip_run('run', 'SVM_RF_cross_validated_balanced_emg_features') as check, check():
+with skip_run('skip', 'SVM_RF_cross_validated_balanced_emg_features') as check, check():
     X1_res, X2_res, Y_res = balance_pooled_emg_features(config)
 
     Y_res = np.argmax(Y_res, axis=1) + 1
@@ -396,7 +400,7 @@ with skip_run('skip', 'svm_lda_cross_validated_pooled_emg_features') as check, c
     lda_cross_validated_pooled_emg_features(X2, Y, config)
 
 # classifier transferability
-with skip_run('run', 'inter-session classification using Hudgins features') as check, check():
+with skip_run('skip', 'inter-session classification using Hudgins features') as check, check():
     train_subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
     test_subjects  = config['test_subjects']
     
@@ -527,7 +531,7 @@ with skip_run('skip', 'extract_force_features') as check, check():
 
 # -------------------- Classification --------------------- #
 ##-- Classification using Riemannian features--##
-with skip_run('run', 'classify_using_riemannian_emg_features_cross_validate') as check, check():
+with skip_run('skip', 'classify_using_riemannian_emg_features_cross_validate') as check, check():
     # Subject information
     # subjects = config['train_subjects']
     subjects = set(config['subjects']) ^ set(config['test_subjects'])
@@ -928,7 +932,7 @@ with skip_run('skip', 'inter_subject_transferability_using_riemannian_features')
     accuracy = clf2.fit(train_ts, train_y).score(test_ts, test_y)
     print("Inter-subject tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
-with skip_run('run', 'inter_session_transferability_using_riemannian_features') as check, check():
+with skip_run('skip', 'inter_session_transferability_using_riemannian_features') as check, check():
     # Subject information
     subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
     # subjects_train = config['train_subjects']
@@ -957,13 +961,18 @@ with skip_run('run', 'inter_session_transferability_using_riemannian_features') 
     train_imu = train_imu[rus.sample_indices_, :, :]
     train_y = train_y[rus.sample_indices_]
 
-    # print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class:4%d' % (y[y==1].shape[0],y[y==2].shape[0],y[y==3].shape[0],y[y==4].shape[0]))
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' 
+          % (train_y[train_y==1].shape[0], train_y[train_y==2].shape[0],
+             train_y[train_y==3].shape[0], train_y[train_y==4].shape[0]))
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' 
+          % (test_y[test_y==1].shape[0], test_y[test_y==2].shape[0],
+             test_y[test_y==3].shape[0], test_y[test_y==4].shape[0]))
 
     # SVM classifier
     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
     # Random forest classifier
-    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
-
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True) # , class_weight={1:2, 2:2, 3:1}) # class weight is not good
+   
     #####----- EMG covariance matrix and its projection in tangent space
     # cov = Covariances().fit(train_emg)
     # ts  = TangentSpace().fit(cov.transform(train_emg))
@@ -1032,7 +1041,7 @@ with skip_run('run', 'inter_session_transferability_using_riemannian_features') 
 
     # jerk_test = np.zeros((test_imu.shape[0],1))
     # for i in range(test_imu.shape[0]):
-    #     jerk_test[i,:] = np.sum(np.sum(np.square(test_imu[i,:,:], dtype=float), axis=1).T) * 0.02
+    #     jerk_test[i,:] = np.sum(np.sum(np.square(test_imu[i,:,:], dtype=float), axis=1).T) * 0.02 # wrong formulation of jerk
     # test_X = np.concatenate((test_X, jerk_test), axis=1)
 
     accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)    
@@ -1040,6 +1049,13 @@ with skip_run('run', 'inter_session_transferability_using_riemannian_features') 
 
     accuracy = clf2.fit(train_X, train_y).score(test_X, test_y)
     print("Inter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
+
+    # model selection is not yielding good results
+    # model = clf2.fit(train_X, train_y).score(test_X, test_y)
+    # print("I SelectFromModel(clf2, prefit=True)
+    # train_X = model.transform(train_X)
+    # test_X  = model.transform(test_X)
+    # accuracynter-session tranfer accuracy using Random Forest: %0.4f " % accuracy.mean())
 
     # print the confusion matrix for the inter-session predictions
     print("Confusion matrix for inter-session classification:", confusion_matrix(test_y, clf2.fit(train_X, train_y).predict(test_X)))
@@ -1126,10 +1142,10 @@ with skip_run('run', 'inter_session_transferability_using_riemannian_features') 
 
     # plt.show()
 
-with skip_run('run', 'inter_task_transferability_using_riemannian_features') as check, check():
+with skip_run('skip', 'inter_task_transferability_using_riemannian_features') as check, check():
     # Subject information
     # subjects_train = list(set(config['subjects']) ^ set(config['test_subjects']))
-    subjects_train = config['train_subjects']
+    subjects_train = config['test_subjects'] #config['train_subjects']
     subjects_test = config['test_subjects']
     print('List of subject for training: ', subjects_train)
     print('List of subject for testing : ', subjects_test)
@@ -1157,15 +1173,18 @@ with skip_run('run', 'inter_task_transferability_using_riemannian_features') as 
     test_y = np.dot(test_y,np.array(np.arange(1, config['n_class']+1)))
 
     # Balance the dataset
-    rus = RandomUnderSampler()
-    rus.fit_resample(train_y[:,np.newaxis], train_y[:,np.newaxis])
+    # rus = RandomUnderSampler()
+    # rus.fit_resample(train_y[:,np.newaxis], train_y[:,np.newaxis])
 
-    train_emg = train_emg[rus.sample_indices_, :, :]
-    train_y = train_y[rus.sample_indices_]
+    # train_emg = train_emg[rus.sample_indices_, :, :]
+    # train_y = train_y[rus.sample_indices_]
 
-    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class:4%d' 
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' 
           % (train_y[train_y==1].shape[0], train_y[train_y==2].shape[0],
              train_y[train_y==3].shape[0], train_y[train_y==4].shape[0]))
+    print('# of samples in Class 1:%d, Class 2:%d, Class 3:%d, Class 4:%d' 
+          % (test_y[test_y==1].shape[0], test_y[test_y==2].shape[0],
+             test_y[test_y==3].shape[0], test_y[test_y==4].shape[0]))
 
     # SVM classifier
     clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr')
@@ -1180,6 +1199,7 @@ with skip_run('run', 'inter_task_transferability_using_riemannian_features') as 
     test_cov  = Covariances().fit_transform(test_emg)
     test_X    = TangentSpace().fit_transform(test_cov)
     
+
     accuracy = clf1.fit(train_X, train_y).score(test_X, test_y)    
     print("Inter-session tranfer accuracy using SVM: %0.4f " % accuracy.mean())
 
@@ -2645,5 +2665,751 @@ with skip_run('skip', 'Some_crazy_little_Idea_hopeit_does_some_good') as check, 
     plt.xlabel('History of epochs used')
     plt.ylabel('Accuracy')
     plt.title('Inter-Session accuracy')
+
+
+
+#######################################
+#IEEE SMC
+#######################################
+with skip_run('skip', 'train_test_split_data') as check, check():
+    # path to load the data
+    path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
+    data = dd.io.load(path)
+
+    subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
+    EMG = []
+    PB  = []
+    y   = []
+
+    for subject in subjects:
+        EMG.append(data['subject_' + subject]['EMG'])
+        PB.append( data['subject_' + subject]['PB'])
+        y.append(  data['subject_' + subject]['labels'])
+
+    # Convert to array
+    EMG = np.concatenate(EMG, axis=0)
+    PB  = np.concatenate(PB, axis=0)
+    y   = np.concatenate(y, axis=0)
+
+    Data = collections.defaultdict()
+
+    id = np.arange(EMG.shape[0])
+    train_id, test_id, _, _ = train_test_split(id, id * 0, test_size=0.25, random_state=42)
+
+    train_X = EMG[train_id, :, :]
+    train_pb = PB[train_id, :, :]
+    train_y = y[train_id, :]
+
+    rus = RandomUnderSampler(random_state=42)
+    rus.fit_resample(train_y, train_y)
+
+    print(len(rus.sample_indices_))
+
+    train_X = train_X[rus.sample_indices_, :, :]
+    train_pb = train_pb[rus.sample_indices_, :, :]
+    train_y = train_y[rus.sample_indices_,:]
+
+    # Training
+    Data['train_x'] = train_X
+    Data['train_pb'] = train_pb
+    Data['train_y'] = train_y
+
+    # Testing
+    Data['test_x'] = EMG[test_id, :, :]
+    Data['test_pb'] = PB[test_id, :, :]
+    Data['test_y'] = y[test_id, :]
+
+
+    EMG_sess = []
+    PB_sess = []
+    y_sess = []
+
+    for subject in config['test_subjects']:
+        EMG_sess.append(data['subject_' + subject]['EMG'])
+        PB_sess.append( data['subject_' + subject]['PB'])
+        y_sess.append(  data['subject_' + subject]['labels'])
+
+    # Convert to array
+    EMG_sess = np.concatenate(EMG_sess, axis=0)
+    PB_sess  = np.concatenate(PB_sess, axis=0)
+    y_sess   = np.concatenate(y_sess, axis=0)
+
+    # session 
+    Data['session_x'] = EMG_sess
+    Data['session_pb'] = PB_sess
+    Data['session_y'] = y_sess
+
+    dd.io.save(Path(__file__).parents[1] / config['train_test_split_dataset'], Data)
+
+
+with skip_run('skip', 'extract_emg_features_train_test_split') as check, check():
+    # save the data in h5 format
+    path = str(Path(__file__).parents[1] / config['subject_emg_features'])
+    data = dd.io.load(path)
+
+    subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
+    TD_feat = []
+    y       = []
+
+    for subject in subjects:
+        TD_feat.append(data['subject_' + subject]['features1'])
+        y.append(data['subject_' + subject]['labels'])
+
+    # Convert to array
+    TD_feat = np.concatenate(TD_feat, axis=0)
+    y       = np.concatenate(y, axis=0)
+
+    Data = collections.defaultdict()
+
+    id = np.arange(TD_feat.shape[0])
+    
+    train_id, test_id, _, _ = train_test_split(id, id * 0, test_size=0.25, random_state=42)
+
+    train_X = TD_feat[train_id, :]
+    train_y = y[train_id, :]
+
+    rus = RandomUnderSampler(random_state=42)
+    rus.fit_resample(train_y, train_y)
+
+    print(len(rus.sample_indices_))
+    train_X = train_X[rus.sample_indices_, :]
+    train_y = train_y[rus.sample_indices_,:]
+
+    # Training
+    Data['train_x'] = train_X
+    Data['train_y'] = train_y
+
+    # Testing
+    Data['test_x'] = TD_feat[test_id, :]
+    Data['test_y'] = y[test_id, :]
+
+    TD_sess = []
+    y_sess = []
+
+    for subject in config['test_subjects']:
+        TD_sess.append(data['subject_' + subject]['features1'])
+        y_sess.append(  data['subject_' + subject]['labels'])
+
+    # Convert to array
+    TD_sess = np.concatenate(TD_sess, axis=0)
+    y_sess   = np.concatenate(y_sess, axis=0)
+
+    # session 
+    Data['session_x'] = TD_sess
+    Data['session_y'] = y_sess
+
+    dd.io.save(Path(__file__).parents[1] / config['train_test_split_TD_features'], Data)
+
+
+with skip_run('skip', 'extract_riemann_features_train_test_split') as check, check():
+    # load the data
+    data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_dataset'])
+
+
+    cov = Covariances().fit_transform(data['train_x'])
+    train_ts  = TangentSpace().fit_transform(cov)
+
+    cov = Covariances().fit_transform(data['test_x'])
+    test_ts  = TangentSpace().fit_transform(cov)
+
+    cov = Covariances().fit_transform(data['session_x'])
+    session_ts  = TangentSpace().fit_transform(cov)
+
+    Data = collections.defaultdict()
+
+    # Training
+    Data['train_x'] = train_ts
+    Data['train_y'] = data['train_y']
+
+    # Testing
+    Data['test_x'] = test_ts
+    Data['test_y'] = data['test_y']
+
+    # session 
+    Data['session_x'] = session_ts
+    Data['session_y'] = data['session_y']
+
+    dd.io.save(Path(__file__).parents[1] / config['train_test_split_RM_features'], Data)
+
+
+with skip_run('skip', 'train_test_classification_first_sessions_SVM_RF') as check, check():
+    # load the TD features
+    TD_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_TD_features'])
+
+    # load the RM features
+    RM_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_RM_features'])
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr', probability=True)
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    # train the classifier on TD features 
+    TD_svm_y = clf1.fit(TD_data['train_x'], (np.argmax(TD_data['train_y'], axis=1) + 1)).predict(TD_data['test_x'])
+    TD_rf_y  = clf2.fit(TD_data['train_x'], (np.argmax(TD_data['train_y'], axis=1) + 1)).predict(TD_data['test_x'])
+
+    # train the classifier on RM features
+    RM_svm_y = clf1.fit(RM_data['train_x'], (np.argmax(RM_data['train_y'], axis=1) + 1)).predict(RM_data['test_x'])
+    RM_rf_y  = clf2.fit(RM_data['train_x'], (np.argmax(RM_data['train_y'], axis=1) + 1)).predict(RM_data['test_x'])
+    
+    df = pd.DataFrame({'TD_SVM': TD_svm_y,
+                      'TD_RF':  TD_rf_y,
+                      'RM_SVM': RM_svm_y,
+                      'RM_RF':  RM_rf_y,
+                      'true_labels': (np.argmax(RM_data['test_y'], axis=1) + 1)})
+    
+    # save the predicted labels 
+    df.to_csv(str(Path(__file__).parents[1] / config['predicted_labels_train_test']))     
+
+
+with skip_run('skip', 'train_test_classification_Inter_sessions_SVM_RF') as check, check():
+    # load the TD features
+    TD_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_TD_features'])
+
+    # load the RM features
+    RM_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_RM_features'])
+
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr', probability=True)
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+
+    # train the classifier on TD features 
+    TD_svm_y = clf1.fit(TD_data['train_x'], (np.argmax(TD_data['train_y'], axis=1) + 1)).predict(TD_data['session_x'])
+    TD_rf_y  = clf2.fit(TD_data['train_x'], (np.argmax(TD_data['train_y'], axis=1) + 1)).predict(TD_data['session_x'])
+
+    # train the classifier on RM features
+    RM_svm_y = clf1.fit(RM_data['train_x'], (np.argmax(RM_data['train_y'], axis=1) + 1)).predict(RM_data['session_x'])
+    RM_rf_y  = clf2.fit(RM_data['train_x'], (np.argmax(RM_data['train_y'], axis=1) + 1)).predict(RM_data['session_x'])
+
+    df = pd.DataFrame({'TD_SVM': TD_svm_y,
+                      'TD_RF':  TD_rf_y,
+                      'RM_SVM': RM_svm_y,
+                      'RM_RF':  RM_rf_y,
+                      'true_labels': (np.argmax(RM_data['session_y'], axis=1) + 1)})
+    
+    # save the predicted labels 
+    df.to_csv(str(Path(__file__).parents[1] / config['predicted_labels_inter_session']))
+
+
+with skip_run('skip', 'voting_based_classification_train_test_split') as check, check():
+
+    df = pd.read_csv(str(Path(__file__).parents[1] / config['predicted_labels_train_test']), delimiter=',')
+    
+    temp = df.drop(columns=['Unnamed: 0', 'true_labels'])
+
+    print(accuracy_score(df['true_labels'].to_numpy(), temp.mode(axis=1)[0].to_numpy()))
+    print(confusion_matrix(df['true_labels'].to_numpy(), temp.mode(axis=1)[0].to_numpy()))
+
+
+    # # score
+    # print('TD SVM accuracy:', accuracy_score(df['true_labels'].to_numpy(), df['TD_SVM'].to_numpy()))
+    # print('TD RF  accuracy:', accuracy_score(df['true_labels'].to_numpy(), df['TD_RF'].to_numpy()))
+    # print('RM SVM accuracy:', accuracy_score(df['true_labels'].to_numpy(), df['RM_SVM'].to_numpy()))
+    # print('RM RF  accuracy:', accuracy_score(df['true_labels'].to_numpy(), df['RM_RF'].to_numpy()))
+
+    # # confusion matrix
+    # print('TD SVM accuracy:', confusion_matrix(df['true_labels'].to_numpy(), df['TD_SVM'].to_numpy()))
+    # print('TD RF  accuracy:', confusion_matrix(df['true_labels'].to_numpy(), df['TD_RF'].to_numpy()))
+    # print('RM SVM accuracy:', confusion_matrix(df['true_labels'].to_numpy(), df['RM_SVM'].to_numpy()))
+    # print('RM RF  accuracy:', confusion_matrix(df['true_labels'].to_numpy(), df['RM_RF'].to_numpy()))
+
+
+with skip_run('skip', 'voting_based_classification_Inter_session') as check, check():
+
+    df = pd.read_csv(str(Path(__file__).parents[1] / config['predicted_labels_inter_session']), delimiter=',')
+    
+    temp = df.drop(columns=['Unnamed: 0', 'true_labels'])
+
+    print(accuracy_score(df['true_labels'].to_numpy(), temp.mode(axis=1)[0].to_numpy()))
+    print(confusion_matrix(df['true_labels'].to_numpy(), temp.mode(axis=1)[0].to_numpy()))
+
+    # # score
+    # print('TD SVM accuracy:', accuracy_score(df['true_labels'].to_numpy(), df['TD_SVM'].to_numpy()))
+    # print('TD RF  accuracy:', accuracy_score(df['true_labels'].to_numpy(), df['TD_RF'].to_numpy()))
+    # print('RM SVM accuracy:', accuracy_score(df['true_labels'].to_numpy(), df['RM_SVM'].to_numpy()))
+    # print('RM RF  accuracy:', accuracy_score(df['true_labels'].to_numpy(), df['RM_RF'].to_numpy()))
+
+    # # confusion matrix
+    # print('TD SVM accuracy:', confusion_matrix(df['true_labels'].to_numpy(), df['TD_SVM'].to_numpy()))
+    # print('TD RF  accuracy:', confusion_matrix(df['true_labels'].to_numpy(), df['TD_RF'].to_numpy()))
+    # print('RM SVM accuracy:', confusion_matrix(df['true_labels'].to_numpy(), df['RM_SVM'].to_numpy()))
+    # print('RM RF  accuracy:', confusion_matrix(df['true_labels'].to_numpy(), df['RM_RF'].to_numpy()))
+
+
+with skip_run('skip', 'Hierarchical_classification_Inter_session') as check, check():
+    # FIXME: not the right way of classification: please correct it 
+    # classify between balanced class (1+2) and class 3 - get the result
+    # then apply class 1 vs class 2 - get the result
+    # the classifier is unable to separate 
+    # load the TD features
+    TD_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_TD_features'])
+
+    # load the RM features
+    RM_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_RM_features'])
+
+
+    TD_train = TD_data['train_x']
+    RM_train = RM_data['train_x']
+
+
+    ################# First level Hierarchy #####################
+    train_labels = (np.argmax(TD_data['train_y'], axis=1) + 1)
+    test_labels = (np.argmax(TD_data['session_y'], axis=1) + 1)
+
+    # club class 1 and 2 as a single class
+    train_labels[train_labels != 3] = 0
+    test_labels[test_labels != 3] = 0
+
+    # SVM classifier
+    clf1 = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr', probability=True)
+    # Random forest classifier
+    clf2 = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    rus = RandomUnderSampler(random_state=32)
+    rus.fit_resample(train_labels.reshape(-1, 1), train_labels)
+
+    TD_train = TD_train[rus.sample_indices_, :]
+    RM_train = RM_train[rus.sample_indices_, :]
+    train_labels = train_labels[rus.sample_indices_]
+
+        
+    # train the classifier on TD features 
+    # TD_svm_y = clf1.fit(TD_train, train_labels).predict(TD_data['session_x'])
+    TD_rf_y  = clf2.fit(TD_train, train_labels).predict(TD_data['session_x'])
+
+    # train the classifier on RM features
+    # RM_svm_y = clf1.fit(RM_train, train_labels).predict(RM_data['session_x'])
+    RM_rf_y  = clf2.fit(RM_train, train_labels).predict(RM_data['session_x'])
+
+
+    # print(accuracy_score(test_labels, TD_svm_y))
+    print(accuracy_score(test_labels, TD_rf_y))
+    # print(accuracy_score(test_labels, RM_svm_y))
+    print(accuracy_score(test_labels, RM_rf_y))
+
+
+    ################# Second level Hierarchy #####################
+
+    train_labels = (np.argmax(TD_data['train_y'], axis=1) + 1)
+    test_labels = (np.argmax(TD_data['session_y'], axis=1) + 1)
+
+    # club class 1 and 2 as a single class
+    train_labels = train_labels[train_labels != 3]
+
+    TD_train = TD_train[train_labels != 3]
+    RM_train = RM_train[train_labels != 3]
+    
+    
+    TD_test  = TD_data['session_x']
+    TD_test  = TD_test[test_labels != 3]
+    RM_test  = RM_data['session_x']
+    RM_test  = RM_test[test_labels != 3]
+    test_labels  = test_labels[test_labels != 3]
+
+    # train the classifier on TD features 
+    # TD_svm_y = clf1.fit(TD_train, train_labels).predict(TD_test)
+    TD_rf_y  = clf2.fit(TD_train, train_labels).predict(TD_test)
+
+    # train the classifier on RM features
+    # RM_svm_y = clf1.fit(RM_train, train_labels).predict(RM_test)
+    RM_rf_y  = clf2.fit(RM_train, train_labels).predict(RM_test)
+
+
+    # print(accuracy_score(test_labels, TD_svm_y))
+    print(accuracy_score(test_labels, TD_rf_y))
+    # print(accuracy_score(test_labels, RM_svm_y))
+    print(accuracy_score(test_labels, RM_rf_y))
+
+
+with skip_run('skip', 'Hierarchical classification two levels pooled data') as check, check():
+    # first level Hierarchy class 1, 2, and 3 using TD and Random Forest
+    # if class 3 then output is class 3
+    # else: Second level Hierarchy
+    #       binary  level classification between 1 and 2 using Riemann + Random Forest
+
+    # Random forest classifier
+    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    ################# First level Hierarchy #####################
+    # load the TD features
+    TD_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_TD_features'])
+    
+    TD_train        = TD_data['train_x']
+    train_labels    = (np.argmax(TD_data['train_y'], axis=1) + 1)
+    test_labels     = (np.argmax(TD_data['test_y'], axis=1) + 1)
+    
+    # predict the labels
+    pred_labels     = clf.fit(TD_train, train_labels).predict(TD_data['test_x'])
+
+    # temp  = pred_labels
+    # temp[pred_labels != 3] = 0
+    # test_labels[pred_labels != 3] = 0
+
+    # Classification between class 3 vs class 1 & 2 
+    print('First level accuracy:', accuracy_score(test_labels, pred_labels))
+    
+
+    ################# Second level Hierarchy #####################
+    # Binary classification between class 1 and class 2
+    # load the RM features
+    RM_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_RM_features'])
+    RM_train      = RM_data['train_x']
+    train_labels2 = (np.argmax(RM_data['train_y'], axis=1) + 1)
+
+    # make the labels 1 and 2, remove class 3
+    RM_train      = RM_train[train_labels2 != 3]
+    train_labels2 = train_labels2[train_labels2 != 3]
+
+    RM_test       = RM_data['test_x']
+    test_labels2  = (np.argmax(RM_data['test_y'], axis=1) + 1)
+    
+    # classification between class 1 and class 2
+    pred_labels2  = clf.fit(RM_train, train_labels2).predict(RM_test[pred_labels != 3])
+
+
+    print("Second level accuracy: ", accuracy_score(test_labels2[pred_labels != 3], pred_labels2))
+
+
+with skip_run('skip', 'Hierarchical classification two binary levels Inter-Session data') as check, check():
+    # first level Hierarchy binary classification between (1, 2) and 3 using TD and Random Forest
+    # if class 3 then output is class 3
+    # else: Second level Hierarchy
+    #       binary  level classification between 1 and 2 using Riemann + Random Forest
+
+    # Random forest classifier
+    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    ################# First level Hierarchy #####################
+    # load the TD features
+    TD_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_TD_features'])
+    
+    TD_train        = TD_data['train_x']
+    train_labels    = (np.argmax(TD_data['train_y'], axis=1) + 1)
+    test_labels     = (np.argmax(TD_data['session_y'], axis=1) + 1)
+    
+    # predict the labels
+    pred_labels     = clf.fit(TD_train, train_labels).predict(TD_data['session_x'])
+
+    temp  = pred_labels
+    temp[pred_labels != 3] = 0
+    test_labels[pred_labels != 3] = 0
+
+    # Classification between class 3 vs class 1 & 2 
+    print('First level accuracy:', accuracy_score(test_labels, temp))
+    
+
+    ################# Second level Hierarchy #####################
+    # Binary classification between class 1 and class 2
+    # load the RM features
+    RM_data = dd.io.load(Path(__file__).parents[1] / config['train_test_split_RM_features'])
+    RM_train      = RM_data['train_x']
+    train_labels2 = (np.argmax(RM_data['train_y'], axis=1) + 1)
+
+    # make the labels 1 and 2, remove class 3
+    RM_train      = RM_train[train_labels2 != 3]
+    train_labels2 = train_labels2[train_labels2 != 3]
+
+    RM_test       = RM_data['session_x']
+    test_labels2  = (np.argmax(RM_data['session_y'], axis=1) + 1)
+    
+    # classification between class 1 and class 2
+    pred_labels2  = clf.fit(RM_train, train_labels2).predict(RM_test[pred_labels != 3])
+
+
+    print("Second level accuracy: ", accuracy_score(test_labels2[pred_labels != 3], pred_labels2))
+
+
+with skip_run('skip', 'extract_riemann_features_subjects_and_trial_wise') as check, check():
+    
+    # path to load the data
+    path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
+    data = dd.io.load(path)
+
+    # prepare the Riemann model using all the training subjects
+    subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
+    EMG = []
+
+    for subject in subjects:
+        EMG.append(data['subject_' + subject]['EMG'])
+
+    # Convert to array
+    EMG = np.concatenate(EMG, axis=0)
+
+    train_cov = Covariances().fit(EMG)
+    train_ts  = TangentSpace().fit(train_cov.transform(EMG))
+    
+    # path to load the data
+    path = str(Path(__file__).parents[1] / config['epoch_emg_data'])
+    data = dd.io.load(path)
+    # extract riemannian features for each subject
+    subjects = config['subjects'] 
+    
+    Data = collections.defaultdict()
+    
+    for subject in subjects:
+        temp1 = collections.defaultdict()        
+
+        for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+            temp  = collections.defaultdict()
+            x = data['subject_' + subject]['EMG'][trial].get_data()    
+
+            if config['n_class'] == 3:
+                # 3-class encoding
+                if trial == 'HighFine':
+                    category = [1, 0, 0]
+                elif trial == 'LowGross':
+                    category = [0, 1, 0]
+                elif (trial == 'HighGross') or (trial == 'LowFine'):
+                    category = [0, 0, 1]
+
+            elif config['n_class'] == 4:
+                # 4-class encoding
+                if trial == 'HighFine':
+                    category = [1, 0, 0, 0]
+                elif trial == 'LowGross':
+                    category = [0, 1, 0, 0]
+                elif trial == 'HighGross':
+                    category = [0, 0, 1, 0]
+                elif trial == 'LowFine':   
+                    category = [0, 0, 0, 1]
+
+            y = category * np.ones((x.shape[0], 1))
+
+            temp['RM'] = train_ts.transform(train_cov.transform(x))
+            temp['labels'] = y
+
+            temp1[trial] = temp
+        
+        Data['subject_' + subject] = temp1
+    
+    # save the file
+    dd.io.save(Path(__file__).parents[1] / config['RM_features_subjectwise'], Data)
+
+
+with skip_run('skip', 'time_series_split_raw_emg_data') as check, check():
+    # path to load the data
+    path = str(Path(__file__).parents[1] / config['RM_features_subjectwise'])
+    data = dd.io.load(path)
+
+    subjects = config['subjects'] #list(set(config['subjects']) ^ set(config['test_subjects']))
+    train_x , train_y = [], []
+    test_x, test_y = [], []
+
+    session_train_x , session_train_y = [], []
+    session_test_x,   session_test_y = [], []
+     
+    for subject in subjects:
+
+        # train_x = collections.defaultdict()
+        # test_x  = collections.defaultdict()
+
+        for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+            
+            X = data['subject_' + subject][trial]['RM']
+            y = data['subject_' + subject][trial]['labels']
+
+            if (trial == "LowFine") or (trial == "HighGross"):
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 165 out of them as these two classes are clubbed
+                id = np.arange(165)
+                id_list = np.split(id, 3) # split the data into 6 equal parts        
+                
+            else:
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 330 out of them
+                id = np.arange(330)
+                id_list = np.split(id, 6) # split the data into 6 equal parts        
+            
+            data_blocks = collections.defaultdict()
+
+            for count, ind in enumerate(id_list):
+                data_blocks['block_' + str(count)] = {"feat" : X[ind, :], "labels" : y[ind, :]}
+
+            if (trial == "LowFine") or (trial == "HighGross"):
+                block_list = ['block_0', 'block_1', 'block_2']
+                random.shuffle(block_list)
+
+                for i, block_id in enumerate(block_list):
+                    if subject in config['test_subjects']:
+                        if i < 1:
+                            session_train_x.append(data_blocks[block_id]['feat'])
+                            session_train_y.append(data_blocks[block_id]['labels'])
+                        else:
+                            session_test_x.append(data_blocks[block_id]['feat'])
+                            session_test_y.append(data_blocks[block_id]['labels'])
+                    else: 
+                        if i < 2:
+                            # train_x.update(data_blocks[block_id])
+                            train_x.append(data_blocks[block_id]['feat'])
+                            train_y.append(data_blocks[block_id]['labels'])
+                        else:
+                            test_x.append(data_blocks[block_id]['feat'])
+                            test_y.append(data_blocks[block_id]['labels'])
+
+            else:
+                block_list = ['block_0', 'block_1', 'block_2', 'block_3', 'block_4', 'block_5']
+                random.shuffle(block_list)
+
+                for i, block_id in enumerate(block_list):
+                    if subject in config['test_subjects']:
+                        if i < 2:
+                            session_train_x.append(data_blocks[block_id]['feat'])
+                            session_train_y.append(data_blocks[block_id]['labels'])
+                        else:
+                            session_test_x.append(data_blocks[block_id]['feat'])
+                            session_test_y.append(data_blocks[block_id]['labels'])
+                    else: 
+                        if i < 4:
+                            # train_x.update(data_blocks[block_id])
+                            train_x.append(data_blocks[block_id]['feat'])
+                            train_y.append(data_blocks[block_id]['labels'])
+                        else:
+                            test_x.append(data_blocks[block_id]['feat'])
+                            test_y.append(data_blocks[block_id]['labels'])
+
+    train_x = np.concatenate(train_x, axis=0)
+    train_y = np.concatenate(train_y, axis=0)
+    test_x  = np.concatenate(test_x, axis=0)
+    test_y  = np.concatenate(test_y, axis=0)
+
+    # second session
+    session_train_x = np.concatenate(session_train_x, axis=0)
+    session_train_y = np.concatenate(session_train_y, axis=0)
+    session_test_x  = np.concatenate(session_test_x, axis=0)
+    session_test_y  = np.concatenate(session_test_y, axis=0)
+
+    Data = collections.defaultdict()
+
+    # Training
+    Data['train_x'] = train_x
+    Data['train_y'] = train_y
+
+    # Testing
+    Data['test_x'] = test_x
+    Data['test_y'] = test_y
+
+    # Training
+    Data['session_train_x'] = session_train_x
+    Data['session_train_y'] = session_train_y
+
+    # Testing
+    Data['session_test_x'] = session_test_x
+    Data['session_test_y'] = session_test_y
+
+    dd.io.save(Path(__file__).parents[1] / config['RM_features_orderly_pool'], Data)
+
+
+with skip_run('run', 'RF_classifier_on_RM_orderly_train_test_data') as check, check():
+    # this data is orderly RM features obtained for each trial by first n seconds (train) and rest (test)
+
+    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    data = dd.io.load(Path(__file__).parents[1] / config['RM_features_orderly_pool'])
+    
+    train_y = np.argmax(data['train_y'], axis=1) + 1
+    test_y  = np.argmax(data['test_y'], axis=1) + 1
+    session_test_y = np.argmax(data['session_test_y'], axis=1) + 1
+
+    RF_clf = clf.fit(data['train_x'], train_y)
+    score = RF_clf.score(data['test_x'], test_y)
+    print("Accuracy of RF on ordered RM features first session : ", score)
+
+    score = RF_clf.score(data['session_test_x'], session_test_y)
+    print("Testing accuracy of RF on second session : ", score)
+
+    test_pred = RF_clf.predict(data['test_x'])
+    session_pred = RF_clf.predict(data['session_test_x'])
+
+    plt.figure()
+    plt.plot(test_pred, label="predicted label")
+    plt.plot(test_y, label="true label")
+    plt.title('Session 1 predictions')
+    plt.legend()
+
+    plt.figure()
+    plt.plot(session_pred, label="predicted label")
+    plt.plot(session_test_y, label="true label")
+    plt.title('Session 2 predictions')
+    plt.legend()
+
+
+with skip_run('run', 'RF_correction_without_session_training_data') as check, check():
+    # implement the correction alogrithm without using session data in training
+    corr_win = 4
+    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    data = dd.io.load(Path(__file__).parents[1] / config['RM_features_orderly_pool'])
+    
+    train_x = np.concatenate((data['train_x'], data['session_train_x']), axis=0)
+    train_y = np.concatenate((data['train_y'], data['session_train_y']), axis=0)
+
+    print(train_x.shape, train_y.shape)
+    # train_x = data['train_x']
+    # train_y = data['train_y']
+    test_x  = data['test_x']
+    session_test_x = data['session_test_x']
+
+    train_y = np.argmax(train_y, axis=1) + 1
+    test_y  = np.argmax(data['test_y'], axis=1) + 1
+    session_test_y = np.argmax(data['session_test_y'], axis=1) + 1
+
+    # only using training and second session data
+    RF_clf = clf.fit(train_x, train_y)
+
+    score = RF_clf.score(test_x, test_y)
+    print("Accuracy of first session without correction: ", score)
+
+    score = RF_clf.score(session_test_x, session_test_y)
+    print("Testing accuracy of second session before correction: ", score)
+
+    plt.figure()
+    plt.plot(RF_clf.predict(test_x), label="predicted label")
+    plt.plot(test_y, label="true label")
+    plt.title('Session 1 predictions without correction')
+    plt.legend()
+
+    plt.figure()
+    plt.plot(RF_clf.predict(session_test_x), label="predicted label")
+    plt.plot(session_test_y, label="true label")
+    plt.title('Session 2 predictions without correction')
+    plt.legend()
+
+    test_pred = []
+    for i in range(test_x.shape[0]):
+        if i < corr_win:
+            test_pred.append(RF_clf.predict(test_x[i,:].reshape(1, -1)).item())
+        else:
+            pred = RF_clf.predict(test_x[i-corr_win:i+1,:])
+            test_pred.append(int(collections.Counter(pred).most_common(1)[0][0]))
+
+    test_pred = np.array(test_pred).reshape(-1, 1)
+    score = accuracy_score(test_y, test_pred)
+    print("Testing accuracy of first session after correction: ", score)
+
+    session_pred = []
+    for i in range(session_test_x.shape[0]):
+        if i < corr_win:
+            session_pred.append(RF_clf.predict(session_test_x[i,:].reshape(1, -1)).item())
+        else:
+            pred = RF_clf.predict(session_test_x[i-corr_win:i+1,:])
+            session_pred.append(int(collections.Counter(pred).most_common(1)[0][0]))
+
+    session_pred = np.array(session_pred).reshape(-1, 1)
+    score = accuracy_score(session_test_y, session_pred)
+    print("Testing accuracy of second session after correction: ", score)
+
+
+    plt.figure()
+    plt.plot(test_pred, label="predicted label")
+    plt.plot(test_y, label="true label")
+    plt.title('Session 1 predictions with correction')
+    plt.legend()
+
+    plt.figure()
+    plt.plot(session_pred, label="predicted label")
+    plt.plot(session_test_y, label="true label")
+    plt.title('Session 2 predictions with correction')
+    plt.legend()
     
 plt.show()
