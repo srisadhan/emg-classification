@@ -66,7 +66,7 @@ from sklearn_hierarchical_classification.metrics import h_fbeta_score, multi_lab
 
 from features.emg_features import (extract_emg_features, pool_subject_emg_features,
                                 svm_cross_validated_pooled_emg_features,
-                                balance_pooled_emg_features,
+                                balance_pooled_emg_features, hudgins_features,
                                 lda_cross_validated_pooled_emg_features,
                                 RF_cross_validated_pooled_emg_features)
 
@@ -3121,7 +3121,10 @@ with skip_run('skip', 'Hierarchical classification two binary levels Inter-Sessi
 
     print("Second level accuracy: ", accuracy_score(test_labels2[pred_labels != 3], pred_labels2))
 
-
+#################################
+# Extracting the blocks of continuous data and then randomly selecting it for training and testing
+#################################
+## ------------- Riemannian features------------ ##
 with skip_run('skip', 'extract_riemann_features_subjects_and_trial_wise') as check, check():
     
     # path to load the data
@@ -3189,7 +3192,7 @@ with skip_run('skip', 'extract_riemann_features_subjects_and_trial_wise') as che
     dd.io.save(Path(__file__).parents[1] / config['RM_features_subjectwise'], Data)
 
 
-with skip_run('skip', 'time_series_split_raw_emg_data') as check, check():
+with skip_run('skip', 'time_series_split_riemann_features') as check, check():
     # path to load the data
     path = str(Path(__file__).parents[1] / config['RM_features_subjectwise'])
     data = dd.io.load(path)
@@ -3202,9 +3205,6 @@ with skip_run('skip', 'time_series_split_raw_emg_data') as check, check():
     session_test_x,   session_test_y = [], []
      
     for subject in subjects:
-
-        # train_x = collections.defaultdict()
-        # test_x  = collections.defaultdict()
 
         for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
             
@@ -3300,7 +3300,7 @@ with skip_run('skip', 'time_series_split_raw_emg_data') as check, check():
     dd.io.save(Path(__file__).parents[1] / config['RM_features_orderly_pool'], Data)
 
 
-with skip_run('run', 'RF_classifier_on_RM_orderly_train_test_data') as check, check():
+with skip_run('skip', 'RF_classifier_on_RM_orderly_train_test_data') as check, check():
     # this data is orderly RM features obtained for each trial by first n seconds (train) and rest (test)
 
     clf = RandomForestClassifier(n_estimators=100, oob_score=True)
@@ -3334,7 +3334,7 @@ with skip_run('run', 'RF_classifier_on_RM_orderly_train_test_data') as check, ch
     plt.legend()
 
 
-with skip_run('run', 'RF_correction_without_session_training_data') as check, check():
+with skip_run('skip', 'RF_correction_without_session_training_data') as check, check():
     # implement the correction alogrithm without using session data in training
     corr_win = 4
     clf = RandomForestClassifier(n_estimators=100, oob_score=True)
@@ -3412,4 +3412,287 @@ with skip_run('run', 'RF_correction_without_session_training_data') as check, ch
     plt.title('Session 2 predictions with correction')
     plt.legend()
     
+
+## ------------- Hudgins features------------ ##
+with skip_run('run', 'extract_hudgins_features_subjects_and_trial_wise') as check, check():
+    
+    # path to load the data
+    path = str(Path(__file__).parents[1] / config['epoch_emg_data'])
+    data = dd.io.load(path)
+    # extract riemannian features for each subject
+    subjects = config['subjects'] 
+    
+    Data = collections.defaultdict()
+    
+    for subject in subjects:
+        temp1 = collections.defaultdict()        
+
+        for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+            temp  = collections.defaultdict()
+            x = data['subject_' + subject]['EMG'][trial].get_data()    
+
+            if config['n_class'] == 3:
+                # 3-class encoding
+                if trial == 'HighFine':
+                    category = [1, 0, 0]
+                elif trial == 'LowGross':
+                    category = [0, 1, 0]
+                elif (trial == 'HighGross') or (trial == 'LowFine'):
+                    category = [0, 0, 1]
+
+            elif config['n_class'] == 4:
+                # 4-class encoding
+                if trial == 'HighFine':
+                    category = [1, 0, 0, 0]
+                elif trial == 'LowGross':
+                    category = [0, 1, 0, 0]
+                elif trial == 'HighGross':
+                    category = [0, 0, 1, 0]
+                elif trial == 'LowFine':   
+                    category = [0, 0, 0, 1]
+
+            y = category * np.ones((x.shape[0], 1))
+
+            temp['TD'] = hudgins_features(x, config, scale=True)
+            temp['labels'] = y
+
+            temp1[trial] = temp
+        
+        Data['subject_' + subject] = temp1
+    
+    # save the file
+    dd.io.save(Path(__file__).parents[1] / config['TD_features_subjectwise'], Data)
+
+
+with skip_run('run', 'time_series_split_hudgins_features') as check, check():
+    # path to load the data
+    path = str(Path(__file__).parents[1] / config['TD_features_subjectwise'])
+    data = dd.io.load(path)
+
+    subjects = config['subjects'] #list(set(config['subjects']) ^ set(config['test_subjects']))
+    train_x , train_y = [], []
+    test_x, test_y = [], []
+
+    session_train_x , session_train_y = [], []
+    session_test_x,   session_test_y = [], []
+     
+    for subject in subjects:
+
+        for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+            
+            X = data['subject_' + subject][trial]['TD']
+            y = data['subject_' + subject][trial]['labels']
+
+            if (trial == "LowFine") or (trial == "HighGross"):
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 165 out of them as these two classes are clubbed
+                id = np.arange(165)
+                id_list = np.split(id, 3) # split the data into 6 equal parts        
+                
+            else:
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 330 out of them
+                id = np.arange(330)
+                id_list = np.split(id, 6) # split the data into 6 equal parts        
+            
+            data_blocks = collections.defaultdict()
+
+            for count, ind in enumerate(id_list):
+                data_blocks['block_' + str(count)] = {"feat" : X[ind, :], "labels" : y[ind, :]}
+
+            if (trial == "LowFine") or (trial == "HighGross"):
+                block_list = ['block_0', 'block_1', 'block_2']
+                random.shuffle(block_list)
+
+                for i, block_id in enumerate(block_list):
+                    if subject in config['test_subjects']:
+                        if i < 1:
+                            session_train_x.append(data_blocks[block_id]['feat'])
+                            session_train_y.append(data_blocks[block_id]['labels'])
+                        else:
+                            session_test_x.append(data_blocks[block_id]['feat'])
+                            session_test_y.append(data_blocks[block_id]['labels'])
+                    else: 
+                        if i < 2:
+                            # train_x.update(data_blocks[block_id])
+                            train_x.append(data_blocks[block_id]['feat'])
+                            train_y.append(data_blocks[block_id]['labels'])
+                        else:
+                            test_x.append(data_blocks[block_id]['feat'])
+                            test_y.append(data_blocks[block_id]['labels'])
+
+            else:
+                block_list = ['block_0', 'block_1', 'block_2', 'block_3', 'block_4', 'block_5']
+                random.shuffle(block_list)
+
+                for i, block_id in enumerate(block_list):
+                    if subject in config['test_subjects']:
+                        if i < 2:
+                            session_train_x.append(data_blocks[block_id]['feat'])
+                            session_train_y.append(data_blocks[block_id]['labels'])
+                        else:
+                            session_test_x.append(data_blocks[block_id]['feat'])
+                            session_test_y.append(data_blocks[block_id]['labels'])
+                    else: 
+                        if i < 4:
+                            # train_x.update(data_blocks[block_id])
+                            train_x.append(data_blocks[block_id]['feat'])
+                            train_y.append(data_blocks[block_id]['labels'])
+                        else:
+                            test_x.append(data_blocks[block_id]['feat'])
+                            test_y.append(data_blocks[block_id]['labels'])
+
+    train_x = np.concatenate(train_x, axis=0)
+    train_y = np.concatenate(train_y, axis=0)
+    test_x  = np.concatenate(test_x, axis=0)
+    test_y  = np.concatenate(test_y, axis=0)
+
+    # second session
+    session_train_x = np.concatenate(session_train_x, axis=0)
+    session_train_y = np.concatenate(session_train_y, axis=0)
+    session_test_x  = np.concatenate(session_test_x, axis=0)
+    session_test_y  = np.concatenate(session_test_y, axis=0)
+
+    Data = collections.defaultdict()
+
+    # Training
+    Data['train_x'] = train_x
+    Data['train_y'] = train_y
+
+    # Testing
+    Data['test_x'] = test_x
+    Data['test_y'] = test_y
+
+    # Training
+    Data['session_train_x'] = session_train_x
+    Data['session_train_y'] = session_train_y
+
+    # Testing
+    Data['session_test_x'] = session_test_x
+    Data['session_test_y'] = session_test_y
+
+    dd.io.save(Path(__file__).parents[1] / config['TD_features_orderly_pool'], Data)
+
+
+with skip_run('run', 'RF_classifier_on_hudgins_orderly_train_test_data') as check, check():
+    # this data is orderly RM features obtained for each trial by first n seconds (train) and rest (test)
+
+    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    data = dd.io.load(Path(__file__).parents[1] / config['TD_features_orderly_pool'])
+    
+    train_y = np.argmax(data['train_y'], axis=1) + 1
+    test_y  = np.argmax(data['test_y'], axis=1) + 1
+    session_test_y = np.argmax(data['session_test_y'], axis=1) + 1
+
+    RF_clf = clf.fit(data['train_x'], train_y)
+    score = RF_clf.score(data['test_x'], test_y)
+    print("Accuracy of RF on ordered EMG features first session : ", score)
+
+    score = RF_clf.score(data['session_test_x'], session_test_y)
+    print("Testing accuracy of EMG on second session : ", score)
+
+    test_pred = RF_clf.predict(data['test_x'])
+    session_pred = RF_clf.predict(data['session_test_x'])
+
+    plt.figure()
+    plt.plot(test_pred, label="predicted label")
+    plt.plot(test_y, label="true label")
+    plt.title('Session 1 predictions')
+    plt.legend()
+
+    plt.figure()
+    plt.plot(session_pred, label="predicted label")
+    plt.plot(session_test_y, label="true label")
+    plt.title('Session 2 predictions')
+    plt.legend()
+
+
+with skip_run('run', 'RF_correction_on_hudgins_without_session_training_data') as check, check():
+    # implement the correction alogrithm without using session data in training
+    corr_win = 4
+    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+
+    data = dd.io.load(Path(__file__).parents[1] / config['TD_features_orderly_pool'])
+    
+    train_x = np.concatenate((data['train_x'], data['session_train_x']), axis=0)
+    train_y = np.concatenate((data['train_y'], data['session_train_y']), axis=0)
+
+    print(train_x.shape, train_y.shape)
+    # train_x = data['train_x']
+    # train_y = data['train_y']
+    test_x  = data['test_x']
+    session_test_x = data['session_test_x']
+
+    train_y = np.argmax(train_y, axis=1) + 1
+    test_y  = np.argmax(data['test_y'], axis=1) + 1
+    session_test_y = np.argmax(data['session_test_y'], axis=1) + 1
+
+    # only using training and second session data
+    RF_clf = clf.fit(train_x, train_y)
+
+    score = RF_clf.score(test_x, test_y)
+    print("Accuracy of first session without correction: ", score)
+
+    score = RF_clf.score(session_test_x, session_test_y)
+    print("Testing accuracy of second session before correction: ", score)
+
+    plt.figure()
+    plt.plot(RF_clf.predict(test_x), label="predicted label")
+    plt.plot(test_y, label="true label")
+    plt.title('Session 1 predictions without correction')
+    plt.legend()
+
+    plt.figure()
+    plt.plot(RF_clf.predict(session_test_x), label="predicted label")
+    plt.plot(session_test_y, label="true label")
+    plt.title('Session 2 predictions without correction')
+    plt.legend()
+
+    test_pred = []
+    for i in range(test_x.shape[0]):
+        if i < corr_win:
+            test_pred.append(RF_clf.predict(test_x[i,:].reshape(1, -1)).item())
+        else:
+            pred = RF_clf.predict(test_x[i-corr_win:i+1,:])
+            test_pred.append(int(collections.Counter(pred).most_common(1)[0][0]))
+
+    test_pred = np.array(test_pred).reshape(-1, 1)
+    score = accuracy_score(test_y, test_pred)
+    print("Testing accuracy of first session after correction: ", score)
+
+    session_pred = []
+    for i in range(session_test_x.shape[0]):
+        if i < corr_win:
+            session_pred.append(RF_clf.predict(session_test_x[i,:].reshape(1, -1)).item())
+        else:
+            pred = RF_clf.predict(session_test_x[i-corr_win:i+1,:])
+            session_pred.append(int(collections.Counter(pred).most_common(1)[0][0]))
+
+    session_pred = np.array(session_pred).reshape(-1, 1)
+    score = accuracy_score(session_test_y, session_pred)
+    print("Testing accuracy of second session after correction: ", score)
+
+
+    plt.figure()
+    plt.plot(test_pred, label="predicted label")
+    plt.plot(test_y, label="true label")
+    plt.title('Session 1 predictions with correction')
+    plt.legend()
+
+    plt.figure()
+    plt.plot(session_pred, label="predicted label")
+    plt.plot(session_test_y, label="true label")
+    plt.title('Session 2 predictions with correction')
+    plt.legend()
+    
+
+
+
+
+
+
+
+
+
+
+
 plt.show()

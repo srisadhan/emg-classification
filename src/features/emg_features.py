@@ -208,7 +208,6 @@ def lda_cross_validated_pooled_emg_features(X, Y, config):
 
     print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) * 2 ))
     
-
 def RF_cross_validated_pooled_emg_features(X, Y, config):
     """ Load the EMG data and extract the features
     Parameters
@@ -228,3 +227,47 @@ def RF_cross_validated_pooled_emg_features(X, Y, config):
     scores = cross_val_score(clf, X, Y, cv=KFold(10, shuffle=True))
 
     print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) * 2))
+
+
+def hudgins_features(emg_vec, config, scale=False):
+    """ Extract the four hudgin's features 
+    Parameters
+    ----------
+    data : dictionary
+        epoched emg data
+    config : yaml
+        configuration file
+    scale : bool
+        use min-max scaling if scale=True
+        
+    Return
+    ------
+    Data : dictionary
+        dictionary of feature and label data from all the subjects
+    """
+
+    Data = collections.defaultdict(dict)    
+
+    # A 3d array with dimensions representing trial_samples x emg_channels x epochs
+    data_shape = emg_vec.shape
+    # initialize the feature array - samples x features
+    features   = np.zeros((data_shape[0],config['n_electrodes'] * config['n_features']))
+
+    for i in range(data_shape[0]):
+        for j in range(data_shape[1]):
+            rawEMGSignal         = emg_vec[i,j,:]
+
+            # feature set 1
+            features[i,4*j]     = pysiology.electromyography.getWL(rawEMGSignal)
+            features[i,4*j+1]   = pysiology.electromyography.getZC(rawEMGSignal, config['threshold'])
+            features[i,4*j+2]   = pysiology.electromyography.getSSC(rawEMGSignal, config['threshold'])
+            features[i,4*j+3]   = pysiology.electromyography.getMAV(rawEMGSignal)
+
+    if scale:
+        # print('Min-Max scaling the emg-features')
+        # Min-Max scaling
+        min_max_scaler = preprocessing.MinMaxScaler()
+        features      = min_max_scaler.fit_transform(features)
+
+
+    return features
