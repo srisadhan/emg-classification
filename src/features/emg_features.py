@@ -229,7 +229,7 @@ def RF_cross_validated_pooled_emg_features(X, Y, config):
     print('10-fold cross validation Average accuracy: %0.4f (+/- %0.4f)' % ( np.mean(scores), np.std(scores) * 2))
 
 
-def hudgins_features(emg_vec, config, scale=False):
+def hudgins_features(emg_vec, config):
     """ Extract the four hudgin's features 
     Parameters
     ----------
@@ -237,8 +237,6 @@ def hudgins_features(emg_vec, config, scale=False):
         epoched emg data
     config : yaml
         configuration file
-    scale : bool
-        use min-max scaling if scale=True
         
     Return
     ------
@@ -263,11 +261,5 @@ def hudgins_features(emg_vec, config, scale=False):
             features[i,4*j+2]   = pysiology.electromyography.getSSC(rawEMGSignal, config['threshold'])
             features[i,4*j+3]   = pysiology.electromyography.getMAV(rawEMGSignal)
 
-    if scale:
-        # print('Min-Max scaling the emg-features')
-        # Min-Max scaling
-        min_max_scaler = preprocessing.MinMaxScaler()
-        features      = min_max_scaler.fit_transform(features)
-
-
+    
     return features

@@ -59,6 +59,7 @@ from sklearn.covariance import ShrunkCovariance
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.decomposition import TruncatedSVD
 from sklearn.pipeline import Pipeline
+from sklearn import preprocessing
 
 from sklearn_hierarchical_classification.classifier import HierarchicalClassifier
 from sklearn_hierarchical_classification.constants import ROOT
@@ -88,7 +89,9 @@ import joblib
 # The configuration file
 config = yaml.load(open('src/config.yml'), Loader=yaml.SafeLoader)
 
+##############################################################
 ### --------------- Preprocessing data --------------------###
+##############################################################
 # ------------------- Create EMG data ---------------------- #
 with skip_run('skip', 'create_emg_data') as check, check():
     data = create_emg_data(config['subjects'], config['trials'], config)
@@ -164,7 +167,7 @@ with skip_run('skip', 'save_EMG_PB_IMU_data') as check, check():
     path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
     dd.io.save(path, features)
 
-#  All the above files have to be run if any update to the data parameters are made #
+# NOTE: All the above files have to be run if any update to the data parameters are made #
 
 
 with skip_run('skip', 'save_EMG_PB_data_for_Rakesh') as check, check():
@@ -3192,7 +3195,7 @@ with skip_run('skip', 'extract_riemann_features_subjects_and_trial_wise') as che
     dd.io.save(Path(__file__).parents[1] / config['RM_features_subjectwise'], Data)
 
 
-with skip_run('skip', 'time_series_split_riemann_features') as check, check():
+with skip_run('run', 'time_series_split_riemann_features') as check, check():
     # path to load the data
     path = str(Path(__file__).parents[1] / config['RM_features_subjectwise'])
     data = dd.io.load(path)
@@ -3300,11 +3303,12 @@ with skip_run('skip', 'time_series_split_riemann_features') as check, check():
     dd.io.save(Path(__file__).parents[1] / config['RM_features_orderly_pool'], Data)
 
 
-with skip_run('skip', 'RF_classifier_on_RM_orderly_train_test_data') as check, check():
+with skip_run('run', 'RF_classifier_on_RM_orderly_train_test_data') as check, check():
     # this data is orderly RM features obtained for each trial by first n seconds (train) and rest (test)
 
-    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
-
+    # clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+    clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+    
     data = dd.io.load(Path(__file__).parents[1] / config['RM_features_orderly_pool'])
     
     train_y = np.argmax(data['train_y'], axis=1) + 1
@@ -3321,24 +3325,28 @@ with skip_run('skip', 'RF_classifier_on_RM_orderly_train_test_data') as check, c
     test_pred = RF_clf.predict(data['test_x'])
     session_pred = RF_clf.predict(data['session_test_x'])
 
-    plt.figure()
-    plt.plot(test_pred, label="predicted label")
-    plt.plot(test_y, label="true label")
-    plt.title('Session 1 predictions')
-    plt.legend()
+    # test the accuracy by training the classifier on the session2 25% data and test on session2- 75% data
+    score = clf.fit(data['session_train_x'], np.argmax(data['session_train_y'], axis=1) + 1).score(data['session_test_x'], session_test_y)
+    print("Accuracy only on the session 2 data:", score)
+    # plt.figure()
+    # plt.plot(test_pred, label="predicted label")
+    # plt.plot(test_y, label="true label")
+    # plt.title('Session 1 predictions')
+    # plt.legend()
+    
+    # for i in range(config['n_class']):
+    #     plt.figure()
+    #     plt.plot(session_pred[session_test_y == (i+1)], label="predicted label")
+    #     plt.plot(session_test_y[session_test_y == (i+1)], label="true label")
+    #     plt.title('Class: ' + str(i+1) + ' - Session 2 predictions with correction')
 
-    plt.figure()
-    plt.plot(session_pred, label="predicted label")
-    plt.plot(session_test_y, label="true label")
-    plt.title('Session 2 predictions')
-    plt.legend()
 
-
-with skip_run('skip', 'RF_correction_without_session_training_data') as check, check():
+with skip_run('run', 'RF_correction_without_session_training_data') as check, check():
     # implement the correction alogrithm without using session data in training
     corr_win = 4
-    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
-
+    # clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+    clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+    
     data = dd.io.load(Path(__file__).parents[1] / config['RM_features_orderly_pool'])
     
     train_x = np.concatenate((data['train_x'], data['session_train_x']), axis=0)
@@ -3363,17 +3371,23 @@ with skip_run('skip', 'RF_correction_without_session_training_data') as check, c
     score = RF_clf.score(session_test_x, session_test_y)
     print("Testing accuracy of second session before correction: ", score)
 
-    plt.figure()
-    plt.plot(RF_clf.predict(test_x), label="predicted label")
-    plt.plot(test_y, label="true label")
-    plt.title('Session 1 predictions without correction')
-    plt.legend()
+    # plt.figure()
+    # plt.plot(RF_clf.predict(test_x), label="predicted label")
+    # plt.plot(test_y, label="true label")
+    # plt.title('Session 1 predictions without correction')
+    # plt.legend()
 
-    plt.figure()
-    plt.plot(RF_clf.predict(session_test_x), label="predicted label")
-    plt.plot(session_test_y, label="true label")
-    plt.title('Session 2 predictions without correction')
-    plt.legend()
+    session_pred = RF_clf.predict(session_test_x)
+    for i in range(config['n_class']):
+        plt.figure()
+        plt.plot(session_pred[session_test_y == (i+1)], label="predicted label")
+        plt.plot(session_test_y[session_test_y == (i+1)], label="true label")
+        plt.title('Class: ' + str(i+1) + ' - Session 2 predictions without correction')
+        
+        # save the predictions to csv
+        df = pd.DataFrame({'true': session_test_y[session_test_y == (i+1)], 'predictions': session_pred[session_test_y == (i+1)]})
+        savepath  = str(Path(__file__).parents[1]) +  '/data/processed/RM_class_' + str(i+1) +'.csv'
+        df.to_csv(savepath)
 
     test_pred = []
     for i in range(test_x.shape[0]):
@@ -3400,22 +3414,65 @@ with skip_run('skip', 'RF_correction_without_session_training_data') as check, c
     print("Testing accuracy of second session after correction: ", score)
 
 
-    plt.figure()
-    plt.plot(test_pred, label="predicted label")
-    plt.plot(test_y, label="true label")
-    plt.title('Session 1 predictions with correction')
-    plt.legend()
+    # plt.figure()
+    # plt.plot(test_pred, label="predicted label")
+    # plt.plot(test_y, label="true label")
+    # plt.title('Session 1 predictions with correction')
+    # plt.legend()
 
-    plt.figure()
-    plt.plot(session_pred, label="predicted label")
-    plt.plot(session_test_y, label="true label")
-    plt.title('Session 2 predictions with correction')
-    plt.legend()
-    
+    for i in range(config['n_class']):
+        plt.figure()
+        plt.plot(session_pred[session_test_y == (i+1)], label="predicted label")
+        plt.plot(session_test_y[session_test_y == (i+1)], label="true label")
+        plt.title('Class: ' + str(i+1) + ' - Session 2 predictions with correction')
+
+        # save the predictions to csv
+        df = pd.DataFrame({'true': session_test_y[session_test_y == (i+1)], 'predictions': session_pred[session_test_y == (i+1)].reshape(-1,)})
+        savepath  = str(Path(__file__).parents[1]) +  '/data/processed/RM_corrected_class_' + str(i+1) +'.csv'
+        df.to_csv(savepath)
 
 ## ------------- Hudgins features------------ ##
-with skip_run('run', 'extract_hudgins_features_subjects_and_trial_wise') as check, check():
+with skip_run('skip', 'extract_emg_features') as check, check():
+    # path to save
+    path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])
+    data = dd.io.load(path)
+
+    data = extract_emg_features(data, config, scale=False)
+
+    # save the data in h5 format
+    path = str(Path(__file__).parents[1] / config['subject__unnorm_emg_features'])
+    save_data(path,data,save=True)
+
+with skip_run('skip', 'pool_subject_emg_features') as check, check():
+
+    path = str(Path(__file__).parents[1] / config['subject__unnorm_emg_features'])
+    data = dd.io.load(path)
     
+    subjects = set(config['subjects']) ^ set(config['test_subjects'])
+    X1, X2, Y = pool_subject_emg_features(data, subjects, config)
+
+    data = {}
+    data['X1'] = X1
+    data['X2'] = X2
+    data['Y']  = Y
+  
+    # save the data in h5 format
+    path = str(Path(__file__).parents[1] / config['pooled_emg_features'])
+    save_data(path,data,save=True)
+
+
+with skip_run('skip', 'extract_hudgins_features_subjects_and_trial_wise') as check, check():
+    
+    # Normalize the data subject wise
+    scale = True
+    # Use this data to extract the maxmium and minimum values of the EMG features for each subject
+    ############################
+    path = str(Path(__file__).parents[1] / config['subject__unnorm_emg_features'])
+    TD_data = dd.io.load(path)
+    min_max_scaler = preprocessing.MinMaxScaler(feature_range=(0,1))    
+    ###########################
+    
+
     # path to load the data
     path = str(Path(__file__).parents[1] / config['epoch_emg_data'])
     data = dd.io.load(path)
@@ -3427,6 +3484,12 @@ with skip_run('run', 'extract_hudgins_features_subjects_and_trial_wise') as chec
     for subject in subjects:
         temp1 = collections.defaultdict()        
 
+        if scale:
+            mm_scaler      = min_max_scaler.fit(TD_data['subject_' + subject]['features1'])
+
+        mn = np.min(TD_data['subject_' + subject]['features1'],axis=0)
+        mx = np.max(TD_data['subject_' + subject]['features1'],axis=0)
+        
         for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
             temp  = collections.defaultdict()
             x = data['subject_' + subject]['EMG'][trial].get_data()    
@@ -3453,7 +3516,9 @@ with skip_run('run', 'extract_hudgins_features_subjects_and_trial_wise') as chec
 
             y = category * np.ones((x.shape[0], 1))
 
-            temp['TD'] = hudgins_features(x, config, scale=True)
+            features = hudgins_features(x, config)
+            
+            temp['TD'] = mm_scaler.transform(features)
             temp['labels'] = y
 
             temp1[trial] = temp
@@ -3575,15 +3640,22 @@ with skip_run('run', 'time_series_split_hudgins_features') as check, check():
 with skip_run('run', 'RF_classifier_on_hudgins_orderly_train_test_data') as check, check():
     # this data is orderly RM features obtained for each trial by first n seconds (train) and rest (test)
 
-    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+    # clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+    clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
 
     data = dd.io.load(Path(__file__).parents[1] / config['TD_features_orderly_pool'])
     
     train_y = np.argmax(data['train_y'], axis=1) + 1
     test_y  = np.argmax(data['test_y'], axis=1) + 1
+    print(len(train_y[train_y == 1]), len(train_y[train_y == 2]), len(train_y[train_y == 3]))
+    
     session_test_y = np.argmax(data['session_test_y'], axis=1) + 1
 
     RF_clf = clf.fit(data['train_x'], train_y)
+    
+    score = clf.score(data['train_x'], train_y)
+    print('Training accuracy:', score)
+    
     score = RF_clf.score(data['test_x'], test_y)
     print("Accuracy of RF on ordered EMG features first session : ", score)
 
@@ -3593,24 +3665,29 @@ with skip_run('run', 'RF_classifier_on_hudgins_orderly_train_test_data') as chec
     test_pred = RF_clf.predict(data['test_x'])
     session_pred = RF_clf.predict(data['session_test_x'])
 
-    plt.figure()
-    plt.plot(test_pred, label="predicted label")
-    plt.plot(test_y, label="true label")
-    plt.title('Session 1 predictions')
-    plt.legend()
+    # test the accuracy by training the classifier on the session2 25% data and test on session2- 75% data
+    score = clf.fit(data['session_train_x'], np.argmax(data['session_train_y'], axis=1) + 1).score(data['session_test_x'], session_test_y)
+    print("Accuracy only on the session 2 data:", score)
+    # plt.figure()
+    # plt.plot(test_pred, label="predicted label")
+    # plt.plot(test_y, label="true label")
+    # plt.title('Session 1 predictions')
+    # plt.legend()
 
-    plt.figure()
-    plt.plot(session_pred, label="predicted label")
-    plt.plot(session_test_y, label="true label")
-    plt.title('Session 2 predictions')
-    plt.legend()
+    for i in range(config['n_class']):
+        plt.figure()
+        plt.plot(session_pred[session_test_y == (i+1)], 'r.',label="predicted label")
+        plt.plot(session_test_y[session_test_y == (i+1)], 'b-',label="true label")
+        plt.title('Class: ' + str(i+1) + ' - Session 2 predictions')
+        # plt.legend()
 
 
 with skip_run('run', 'RF_correction_on_hudgins_without_session_training_data') as check, check():
     # implement the correction alogrithm without using session data in training
     corr_win = 4
-    clf = RandomForestClassifier(n_estimators=100, oob_score=True)
-
+    # clf = RandomForestClassifier(n_estimators=100, oob_score=True)
+    clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+    
     data = dd.io.load(Path(__file__).parents[1] / config['TD_features_orderly_pool'])
     
     train_x = np.concatenate((data['train_x'], data['session_train_x']), axis=0)
@@ -3635,17 +3712,23 @@ with skip_run('run', 'RF_correction_on_hudgins_without_session_training_data') a
     score = RF_clf.score(session_test_x, session_test_y)
     print("Testing accuracy of second session before correction: ", score)
 
-    plt.figure()
-    plt.plot(RF_clf.predict(test_x), label="predicted label")
-    plt.plot(test_y, label="true label")
-    plt.title('Session 1 predictions without correction')
-    plt.legend()
+    # plt.figure()
+    # plt.plot(RF_clf.predict(test_x), label="predicted label")
+    # plt.plot(test_y, label="true label")
+    # plt.title('Session 1 predictions without correction')
+    # plt.legend()
 
-    plt.figure()
-    plt.plot(RF_clf.predict(session_test_x), label="predicted label")
-    plt.plot(session_test_y, label="true label")
-    plt.title('Session 2 predictions without correction')
-    plt.legend()
+    session_pred = RF_clf.predict(session_test_x)
+    for i in range(config['n_class']):
+        plt.figure()
+        plt.plot(session_pred[session_test_y == (i+1)], label="predicted label")
+        plt.plot(session_test_y[session_test_y == (i+1)], label="true label")
+        plt.title('Class: ' + str(i+1) + ' - Session 2 predictions without correction')
+        
+        # save the predictions to csv
+        df = pd.DataFrame({'true': session_test_y[session_test_y == (i+1)], 'predictions': session_pred[session_test_y == (i+1)]})
+        savepath  = str(Path(__file__).parents[1]) +  '/data/processed/TD_class_' + str(i+1) +'.csv'
+        df.to_csv(savepath)
 
     test_pred = []
     for i in range(test_x.shape[0]):
@@ -3672,27 +3755,27 @@ with skip_run('run', 'RF_correction_on_hudgins_without_session_training_data') a
     print("Testing accuracy of second session after correction: ", score)
 
 
-    plt.figure()
-    plt.plot(test_pred, label="predicted label")
-    plt.plot(test_y, label="true label")
-    plt.title('Session 1 predictions with correction')
-    plt.legend()
+    # plt.figure()
+    # plt.plot(test_pred, label="predicted label")
+    # plt.plot(test_y, label="true label")
+    # plt.title('Session 1 predictions with correction')
+    # plt.legend()
 
-    plt.figure()
-    plt.plot(session_pred, label="predicted label")
-    plt.plot(session_test_y, label="true label")
-    plt.title('Session 2 predictions with correction')
-    plt.legend()
-    
+    for i in range(config['n_class']):
+        plt.figure()
+        plt.plot(session_pred[session_test_y == (i+1)], label="predicted label")
+        plt.plot(session_test_y[session_test_y == (i+1)], label="true label")
+        plt.title('Class: ' + str(i+1) + ' - Session 2 predictions with correction')
 
-
-
-
-
-
+        # save the predictions to csv
+        df = pd.DataFrame({'true': session_test_y[session_test_y == (i+1)], 'predictions': session_pred[session_test_y == (i+1)].reshape(-1,)})
+        savepath  = str(Path(__file__).parents[1]) +  '/data/processed/TD_corrected_class_' + str(i+1) +'.csv'
+        df.to_csv(savepath)
 
 
 
 
 
-plt.show()
+
+
+# plt.show()
