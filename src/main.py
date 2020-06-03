@@ -14,6 +14,7 @@ import numpy as np
 from pathlib import Path
 import pandas as pd 
 
+# PyRiemann package
 from pyriemann.estimation import Covariances, Shrinkage, Coherences
 from pyriemann.tangentspace import TangentSpace, FGDA
 from pyriemann.utils.distance import distance, distance_riemann, distance_logeuclid
@@ -23,6 +24,9 @@ from pyriemann.channelselection import ElectrodeSelection
 from pyriemann.embedding import Embedding
 from pyriemann.spatialfilters import SPoC, CSP
 # from pyriemann.utils.viz import plot_confusion_matrix
+
+# RPA Package (Riemann Procrustes Analysis)
+from rpa import transfer_learning as TL 
 
 from pathlib import Path
 import collections
@@ -79,12 +83,16 @@ from utils import (skip_run, save_data, save_trained_pytorch_model, plot_confusi
 from sklearn.svm import SVC
 from imblearn.under_sampling import RandomUnderSampler
 import scipy  
-from sklearn.manifold import TSNE
-from umap import UMAP
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.metrics import confusion_matrix, accuracy_score, classification_report
 import treegrad as tgd 
 import joblib
+from tqdm import tqdm
+
+# projection modules
+from sklearn.manifold import TSNE
+from umap import UMAP
+from pydiffmap import diffusion_map
 
 # The configuration file
 config = yaml.load(open('src/config.yml'), Loader=yaml.SafeLoader)
@@ -594,8 +602,10 @@ with skip_run('skip', 'classify_using_riemannian_emg_features_cross_validate') a
     print("confusion matrix of the RF fitted model:", confusion_matrix(y, clf2.predict(ts)))
     
     # save the model to disk
-    filename = str(Path(__file__).parents[1] / config['saved_RF_classifier'])
-    joblib.dump(clf1, filename)
+    filename_SVM = str(Path(__file__).parents[1] / config['saved_SVM_classifier'])
+    filename_RF  = str(Path(__file__).parents[1] / config['saved_RF_classifier'])
+    joblib.dump(clf1, filename_SVM)
+    joblib.dump(clf2, filename_RF)
 
     # Linear discriminant analysis - # does not provide good accuracy
     # clf3 = LinearDiscriminantAnalysis(solver='svd')
@@ -1214,21 +1224,29 @@ with skip_run('skip', 'inter_task_transferability_using_riemannian_features') as
 
 
 ## ------------Project features on to manifold----------------##
-with skip_run('skip', 'project_EMG_features') as check, check():
+with skip_run('skip', 'project_EMG_features_UMAP') as check, check():
     # Subject information
-    subjects = config['subjects']
-
-    if config['n_class'] == 3:
-        path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
-    elif config['n_class'] == 4:
-        path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
+    # subjects = list(set(config['subjects']) ^ set(config['subjects2']))
+    
+    # Use this if you want to visualize a single subject's data
+    subjects = ['9005_2']
+    
+    # ---------- This particular part is not used further ---------------------#
+    # if config['n_class'] == 3:
+    #     path = str(Path(__file__).parents[1] / config['clean_emg_data_3class'])
+    # elif config['n_class'] == 4:
+        # path = str(Path(__file__).parents[1] / config['clean_emg_data_4class'])
         
     # Load main data
-    features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
-
+    # features, labels, _ = subject_pooled_EMG_data(subjects, path, config)
+    # -------------------------------------------------------------------------#
+    
+    path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])    
+    features, _ , _, labels= subject_pooled_EMG_PB_IMU_data(subjects, path, config)
+    
     X   = features
-    y   = np.dot(labels,np.array(np.arange(1, config['n_class']+1)))
-
+    y   = np.dot(labels, np.array(np.arange(1, config['n_class']+1)))
+    
     # if I want to project the features of only two classes
     # X   = X[(y==1) | (y==4), :, :]
     # y   = y[(y==1) | (y==4)]
@@ -1239,14 +1257,17 @@ with skip_run('skip', 'project_EMG_features') as check, check():
     # project the covariance into the tangent space
     ts = TangentSpace().fit_transform(covest)
 
-    # ts = np.reshape(covest, (covest.shape[0], covest.shape[1] * covest.shape[2]), order='C')
+    ts = np.reshape(covest, (covest.shape[0], covest.shape[1] * covest.shape[2]), order='C')
     # print(ts.shape)
-    # ts = ts[:,0:36]
+    ts = ts[:, 0:36]
     
     temp1 = y == 1
     temp2 = y == 2
     temp3 = y == 3
-
+    temp4 = y == 4
+    
+    print('Class 1: {}, Class 2: {}, Class 3: {}, Class 4: {}'.format(len(temp1), len(temp2), len(temp3), len(temp4)))
+    
     # TSNE based projection
     # print('t-SNE based data visualization')
     # X_embedded = TSNE(n_components=2, perplexity=100, learning_rate=50.0).fit_transform(ts)
@@ -1258,19 +1279,75 @@ with skip_run('skip', 'project_EMG_features') as check, check():
     # plt.show()
 
     # UMAP based projection
-    for neighbor in [10]: #, 30, 60]:
-        fit = UMAP(n_neighbors=neighbor, min_dist=0.75, n_components=3, metric='chebyshev')
-        X_embedded = fit.fit_transform(ts)
-    
-        fig = plt.figure()
-        ax = Axes3D(fig)
+    # umap_fit = UMAP(n_neighbors=15, min_dist=0.75, n_components=3, metric='chebyshev')
+    umap_fit = UMAP()
+    X_embedded = umap_fit.fit_transform(ts)
 
-        # ax.scatter(X_embedded[:,0], X_embedded[:,1], X_embedded[:,2], c=y.astype(int), cmap='viridis', s=2)
+    fig = plt.figure()
+    ax = Axes3D(fig)
 
-        ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],X_embedded[temp1,2],'b.')
-        ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],X_embedded[temp2,2],'ro')
-        ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],X_embedded[temp3,2],'k.')
+    # ax.scatter(X_embedded[:,0], X_embedded[:,1], X_embedded[:,2], c=y.astype(int), cmap='viridis', s=2)
+
+    ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],'b.') # ,X_embedded[temp1,2]
+    ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],'r.') # ,X_embedded[temp2,2]
+    ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],'g.') # ,X_embedded[temp3,2]
+    # ax.plot(X_embedded[temp4,0],X_embedded[temp4,1],'go') # ,X_embedded[temp4,2]
+        
     plt.show()
+
+#NOTE: This is not working
+with skip_run('skip', 'project_EMG_features_DiffusionMap') as check, check():
+    # Subject information
+    subjects = list(set(config['subjects']) ^ set(config['subjects2']))
+    
+    path = str(Path(__file__).parents[1] / config['clean_emg_pb_data'])    
+    features, _ , _, labels= subject_pooled_EMG_PB_IMU_data(subjects, path, config)
+    
+    X   = features
+    y   = np.dot(labels, np.array(np.arange(1, config['n_class']+1)))
+    
+    X = X[0:1000:2000, :, :]
+    y = y[0:1000:2000]
+    # if I want to project the features of only two classes
+    # X   = X[(y==1) | (y==4), :, :]
+    # y   = y[(y==1) | (y==4)]
+
+    # estimation of the covariance matrix
+    covest = Covariances().fit_transform(X)
+
+    # project the covariance into the tangent space
+    ts = TangentSpace().fit_transform(covest)
+
+    ts = np.reshape(covest, (covest.shape[0], covest.shape[1] * covest.shape[2]), order='C')
+    # print(ts.shape)
+    ts = ts[:, 0:36]
+    
+    temp1 = y == 1
+    temp2 = y == 2
+    temp3 = y == 3
+    temp4 = y == 4
+    
+    print('Class 1: {}, Class 2: {}, Class 3: {}, Class 4: {}'.format(len(temp1), len(temp2), len(temp3), len(temp4)))
+    
+    # Diffusion map based projection
+    mydmap = diffusion_map.DiffusionMap.from_sklearn(n_evecs = 2, epsilon = 'bgh', alpha = 0.5, k=20)
+    X_embedded = mydmap.fit_transform(ts)
+
+    print(temp1, temp2, temp3)
+    print(X_embedded.shape)
+    
+    fig = plt.figure()
+    ax = Axes3D(fig)
+
+    # ax.scatter(X_embedded[:,0], X_embedded[:,1], X_embedded[:,2], c=y.astype(int), cmap='viridis', s=2)
+
+    ax.plot(X_embedded[temp1,0],X_embedded[temp1,1],'bo') # ,X_embedded[temp1,2]
+    ax.plot(X_embedded[temp2,0],X_embedded[temp2,1],'r*') # ,X_embedded[temp2,2]
+    ax.plot(X_embedded[temp3,0],X_embedded[temp3,1],'g.') # ,X_embedded[temp3,2]
+    # ax.plot(X_embedded[temp4,0],X_embedded[temp4,1],'go') # ,X_embedded[temp4,2]
+        
+    plt.show()
+
 
 with skip_run('skip', 'project_Force_data') as check, check():
     # Subject information
@@ -2343,7 +2420,8 @@ with skip_run('skip', 'Correct_interSession_prediction_using_median') as check, 
     trials = list(set(config['trials']) - set(config['comb_trials']))
 
     # load the classifier 
-    filename = str(Path(__file__).parents[1] / config['saved_RF_classifier'])
+    filename = str(Path(__file__).parents[1] / config['saved_SVM_classifier']) # SVM
+    # filename = str(Path(__file__).parents[1] / config['saved_RF_classifier']) # RF
     RF_clf   = joblib.load(filename)
 
     #-------Prepare the training data 
@@ -2399,7 +2477,8 @@ with skip_run('skip', 'Correct_interSession_prediction_using_median') as check, 
                     corr_pred2.append(pred) 
                     total_test_categ.append(np.argmax(temp_labels[i, :]))
                 
-        print(confusion_matrix(total_test_categ, act_pred), confusion_matrix(total_test_categ, corr_pred1), confusion_matrix(total_test_categ, corr_pred2))
+        # print(confusion_matrix(total_test_categ, act_pred), confusion_matrix(total_test_categ, corr_pred1), confusion_matrix(total_test_categ, corr_pred2))
+        print(accuracy_score(total_test_categ, act_pred), accuracy_score(total_test_categ, corr_pred1), accuracy_score(total_test_categ, corr_pred2))
         # print(accuracy_score(total_test_categ, corr_pred1), accuracy_score(total_test_categ, corr_pred2))   
 
         plt.plot(wind_len, accuracy_score(total_test_categ, corr_pred1), 'r*')
@@ -3144,7 +3223,7 @@ with skip_run('skip', 'extract_riemann_features_subjects_and_trial_wise') as che
     # Convert to array
     EMG = np.concatenate(EMG, axis=0)
 
-    train_cov = Covariances().fit(EMG)
+    train_cov = Covariances(estimator='lwf').fit(EMG)
     train_ts  = TangentSpace().fit(train_cov.transform(EMG))
     
     # path to load the data
@@ -3184,7 +3263,8 @@ with skip_run('skip', 'extract_riemann_features_subjects_and_trial_wise') as che
 
             y = category * np.ones((x.shape[0], 1))
 
-            temp['RM'] = train_ts.transform(train_cov.transform(x))
+            temp['cov']    = train_cov.transform(x)
+            temp['RM']     = train_ts.transform(train_cov.transform(x))
             temp['labels'] = y
 
             temp1[trial] = temp
@@ -3194,8 +3274,7 @@ with skip_run('skip', 'extract_riemann_features_subjects_and_trial_wise') as che
     # save the file
     dd.io.save(Path(__file__).parents[1] / config['RM_features_subjectwise'], Data)
 
-
-with skip_run('run', 'time_series_split_riemann_features') as check, check():
+with skip_run('skip', 'time_series_split_riemann_features') as check, check():
     # path to load the data
     path = str(Path(__file__).parents[1] / config['RM_features_subjectwise'])
     data = dd.io.load(path)
@@ -3302,8 +3381,7 @@ with skip_run('run', 'time_series_split_riemann_features') as check, check():
 
     dd.io.save(Path(__file__).parents[1] / config['RM_features_orderly_pool'], Data)
 
-
-with skip_run('run', 'RF_classifier_on_RM_orderly_train_test_data') as check, check():
+with skip_run('skip', 'RF_classifier_on_RM_orderly_train_test_data') as check, check():
     # this data is orderly RM features obtained for each trial by first n seconds (train) and rest (test)
 
     # clf = RandomForestClassifier(n_estimators=100, oob_score=True)
@@ -3340,8 +3418,7 @@ with skip_run('run', 'RF_classifier_on_RM_orderly_train_test_data') as check, ch
     #     plt.plot(session_test_y[session_test_y == (i+1)], label="true label")
     #     plt.title('Class: ' + str(i+1) + ' - Session 2 predictions with correction')
 
-
-with skip_run('run', 'RF_correction_without_session_training_data') as check, check():
+with skip_run('skip', 'RF_correction_without_session_training_data') as check, check():
     # implement the correction alogrithm without using session data in training
     corr_win = 4
     # clf = RandomForestClassifier(n_estimators=100, oob_score=True)
@@ -3460,8 +3537,7 @@ with skip_run('skip', 'pool_subject_emg_features') as check, check():
     path = str(Path(__file__).parents[1] / config['pooled_emg_features'])
     save_data(path,data,save=True)
 
-
-with skip_run('skip', 'extract_hudgins_features_subjects_and_trial_wise') as check, check():
+with skip_run('run', 'extract_hudgins_features_subjects_and_trial_wise') as check, check():
     
     # Normalize the data subject wise
     scale = True
@@ -3472,7 +3548,6 @@ with skip_run('skip', 'extract_hudgins_features_subjects_and_trial_wise') as che
     min_max_scaler = preprocessing.MinMaxScaler(feature_range=(0,1))    
     ###########################
     
-
     # path to load the data
     path = str(Path(__file__).parents[1] / config['epoch_emg_data'])
     data = dd.io.load(path)
@@ -3487,8 +3562,8 @@ with skip_run('skip', 'extract_hudgins_features_subjects_and_trial_wise') as che
         if scale:
             mm_scaler      = min_max_scaler.fit(TD_data['subject_' + subject]['features1'])
 
-        mn = np.min(TD_data['subject_' + subject]['features1'],axis=0)
-        mx = np.max(TD_data['subject_' + subject]['features1'],axis=0)
+        # mn = np.min(TD_data['subject_' + subject]['features1'],axis=0)
+        # mx = np.max(TD_data['subject_' + subject]['features1'],axis=0)
         
         for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
             temp  = collections.defaultdict()
@@ -3528,8 +3603,7 @@ with skip_run('skip', 'extract_hudgins_features_subjects_and_trial_wise') as che
     # save the file
     dd.io.save(Path(__file__).parents[1] / config['TD_features_subjectwise'], Data)
 
-
-with skip_run('run', 'time_series_split_hudgins_features') as check, check():
+with skip_run('skip', 'time_series_split_hudgins_features') as check, check():
     # path to load the data
     path = str(Path(__file__).parents[1] / config['TD_features_subjectwise'])
     data = dd.io.load(path)
@@ -3636,8 +3710,7 @@ with skip_run('run', 'time_series_split_hudgins_features') as check, check():
 
     dd.io.save(Path(__file__).parents[1] / config['TD_features_orderly_pool'], Data)
 
-
-with skip_run('run', 'RF_classifier_on_hudgins_orderly_train_test_data') as check, check():
+with skip_run('skip', 'RF_classifier_on_hudgins_orderly_train_test_data') as check, check():
     # this data is orderly RM features obtained for each trial by first n seconds (train) and rest (test)
 
     # clf = RandomForestClassifier(n_estimators=100, oob_score=True)
@@ -3681,8 +3754,7 @@ with skip_run('run', 'RF_classifier_on_hudgins_orderly_train_test_data') as chec
         plt.title('Class: ' + str(i+1) + ' - Session 2 predictions')
         # plt.legend()
 
-
-with skip_run('run', 'RF_correction_on_hudgins_without_session_training_data') as check, check():
+with skip_run('skip', 'RF_correction_on_hudgins_without_session_training_data') as check, check():
     # implement the correction alogrithm without using session data in training
     corr_win = 4
     # clf = RandomForestClassifier(n_estimators=100, oob_score=True)
@@ -3773,9 +3845,712 @@ with skip_run('run', 'RF_correction_on_hudgins_without_session_training_data') a
         df.to_csv(savepath)
 
 
+#################################
+# Transfer learning based on Riemann Procustes Analysis
+#################################
+# Intersession classification without applying transfer learning 
+# The transfer learning code is used from https://github.com/plcrodrigues/PhD-Code  
+
+# number of samples from target to be used for training
+N = 20  
+with skip_run('skip', 'Prepare_source_target_dataset') as check, check():
+    # load RM features
+    RM_data = dd.io.load(Path(__file__).parents[1] / config['RM_features_subjectwise'])
+    
+    # load TD features
+    TD_data = dd.io.load(Path(__file__).parents[1] / config['TD_features_subjectwise'])
+    
+    ### Prepare the source dataset
+    source_subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
+    # source_subjects = config['train_subjects']
+    source_TD       = []
+    source_RM       = []
+    source_cov      = []
+    source_labels   = []
+    
+    for subject in source_subjects:
+        for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+            TD  = TD_data['subject_' + subject][trial]['TD']
+            RM  = RM_data['subject_' + subject][trial]['RM']
+            cov = RM_data['subject_' + subject][trial]['cov']
+            y   = RM_data['subject_' + subject][trial]['labels']
+
+            if (trial == "LowFine") or (trial == "HighGross"):
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 165 out of them as these two classes are clubbed
+                id = np.arange(165)       
+            else:
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 330 out of them
+                id = np.arange(330)       
+
+            TD  = TD[id, :]
+            RM  = RM[id, :]
+            cov = cov[id, :, :]
+            y   = np.argmax(y[id, :], axis=1) + 1
+
+            source_TD.append(TD)
+            source_RM.append(RM)
+            source_cov.append(cov)
+            source_labels.append( y)
+        
+    Data = collections.defaultdict()
+    
+    Data['source_TD']     = np.concatenate(source_TD, axis=0)
+    Data['source_RM']     = np.concatenate(source_RM, axis=0)
+    Data['source_cov']    = np.concatenate(source_cov, axis=0)
+    Data['source_labels'] = np.concatenate(source_labels, axis=0)
+
+    ### Prepare the target dataset
+    target_subjects = config['test_subjects']
+    target_TD       = []
+    target_RM       = []
+    target_cov      = []
+    target_labels   = []
+    
+    target_train_TD       = []
+    target_train_RM       = []
+    target_train_cov      = []
+    target_train_labels   = []
+    
+    for subject in target_subjects:
+        for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+            TD  = TD_data['subject_' + subject][trial]['TD']
+            RM  = RM_data['subject_' + subject][trial]['RM']
+            cov = RM_data['subject_' + subject][trial]['cov']
+            y   = RM_data['subject_' + subject][trial]['labels']
+
+            y  = np.argmax(y, axis=1) + 1 
+            
+            if (trial == "LowFine") or (trial == "HighGross"):
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 165 out of them as these two classes are clubbed
+                id = np.arange(int(N/2), 165)       
+            else:
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 330 out of them
+                id = np.arange(N, 330)       
+
+            TD  = TD[id, :]
+            RM  = RM[id, :]
+            cov = cov[id, :, :]
+            y   =  y[id]
+
+            target_TD.append(TD)
+            target_RM.append(RM)
+            target_cov.append(cov)
+            target_labels.append( y)
+            
+            # training data from target
+            target_train_TD.append(TD[:N, :])
+            target_train_RM.append(RM[:N, :])
+            target_train_cov.append(cov[:N, :, :])
+            target_train_labels.append(y[:N])
+        
+    Data['target_TD']     = np.concatenate(target_TD, axis=0)
+    Data['target_RM']     = np.concatenate(target_RM, axis=0)
+    Data['target_cov']    = np.concatenate(target_cov, axis=0)
+    Data['target_labels'] = np.concatenate(target_labels, axis=0)
+    
+    Data['target_train_TD']     = np.concatenate(target_train_TD, axis=0)
+    Data['target_train_RM']     = np.concatenate(target_train_RM, axis=0)
+    Data['target_train_cov']    = np.concatenate(target_train_cov, axis=0)
+    Data['target_train_labels'] = np.concatenate(target_train_labels, axis=0)
+    
+    # save the data
+    dd.io.save(Path(__file__).parents[1] / config['source_target_dataset'], Data)
+
+with skip_run('skip', 'Inter-session_accuracy_w/o_transfer_learning') as check, check():
+    # load the dataset
+    data = dd.io.load(Path(__file__).parents[1] / config['source_target_dataset'])
+        
+    source_RM       = data['source_RM']
+    source_TD       = data['source_TD']
+    source_labels   = data['source_labels']
+    target_RM       = data['target_RM']
+    target_TD       = data['target_TD']
+    target_labels   = data['target_labels']
+    
+    source_covest   = data['source_cov']
+    target_covest   = data['target_cov']
+    
+    source_cov = np.reshape(source_covest, (source_covest.shape[0], source_covest.shape[1] * source_covest.shape[2]), order='C')
+    source_cov = source_cov[:, 0:36]
+    
+    target_cov = np.reshape(target_covest, (target_covest.shape[0], target_covest.shape[1] * target_covest.shape[2]), order='C')
+    target_cov = target_cov[:, 0:36]
+    
+    # classifier 
+    clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+    
+    print("SVM training accuracy using Covariances:{}".format(clf.fit(source_cov, source_labels).score(source_cov, source_labels)))
+    print("SVM training accuracy using Tangent Space:{}".format(clf.fit(source_RM, source_labels).score(source_RM, source_labels)))
+    print("SVM training accuracy using Hudgins features:{}".format(clf.fit(source_TD, source_labels).score(source_TD, source_labels)))
+    
+    print("SVM inter-session accuracy using Covariances:{}".format(clf.fit(source_cov, source_labels).score(target_cov, target_labels)))
+    print("SVM inter-session accuracy using Tangent Space:{}".format(clf.fit(source_RM, source_labels).score(target_RM, target_labels)))
+    print("SVM inter-session accuracy using Hudgins features:{}".format(clf.fit(source_TD, source_labels).score(target_TD, target_labels)))
+    
+    # use the part of target data for training 
+    source_RM       = np.concatenate((source_RM, data['target_train_RM']), axis=0)
+    source_TD       = np.concatenate((source_TD, data['target_train_TD']), axis=0)
+    source_labels   = np.concatenate((source_labels, data['target_train_labels']), axis=0)
+    
+    # print("SVM retrain ({} samples) inter-session accuracy using Covariances:{}".format(N, clf.fit(source_cov, source_labels).score(target_cov, target_labels)))
+    print("SVM retrain ({} samples) inter-session accuracy using Tangent Space:{}".format(N, clf.fit(source_RM, source_labels).score(target_RM, target_labels)))
+    print("SVM retrain ({} samples) inter-session accuracy using Hudgins features:{}".format(N, clf.fit(source_TD, source_labels).score(target_TD, target_labels)))
+    
+with skip_run('skip', 'Apply_RPA_based_transfer_learning_RM_features') as check, check():
+    
+    # load the dataset
+    data = dd.io.load(Path(__file__).parents[1] / config['source_target_dataset'])
+        
+    features_source = data['source_cov']
+    labels_source   = data['source_labels']
+    features_target = data['target_cov']
+    labels_target   = data['target_labels']
+    
+    print('Source Class1: {}, Class2: {}, Class3: {}'.format(len(labels_source[labels_source == 1]), len(labels_source[labels_source == 2]), len(labels_source[labels_source == 3])))
+    
+    print('Target Class1: {}, Class2: {}, Class3: {}'.format(len(labels_target[labels_target == 1]), len(labels_target[labels_target == 2]), len(labels_target[labels_target == 3])))
+    
+    # Number of datapoints from session 2 to be considered for training
+    ncovs_target_train = 10
+    data_source       = {}
+    data_target       = {}
+    data_target_train = {}
+    
+    # prepare the source data from session 1
+    data_source['covs']   = features_source
+    data_source['labels'] = labels_source
+
+    # prepare the target data from session 2
+    data_target['covs']   = features_target
+    data_target['labels'] = labels_target
+
+    # prepare training dataset from session 2
+    data_target_train['covs']  = data['target_train_cov']
+    data_target_train['labels']= data['target_train_labels']
+    
+     # setup the scores dictionary
+    scores = {}
+    for meth in ['org', 'rct', 'str', 'rot', 'clb']:
+        scores[meth] = []
+
+    # run the transfer learning for 5 times 
+    for i in tqdm(range(5)):
+        # apply RPA to multiple random partitions for the training dataset
+        clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+        
+        source = {}
+        target_train = {}
+        target_test = {}
+
+        # source['org'], target_train['org'], target_test['org'] = TL.get_sourcetarget_split(data_source, data_target, ncovs_target_train, paradigm='MI')
+        source['org'] = data_source
+        target_train['org'] = data_target_train
+        target_test['org'] = data_target
+        
+        # apply RPA 
+        source['rct'], target_train['rct'], target_test['rct'] = TL.RPA_recenter(source['org'], target_train['org'], target_test['org'])
+        source['str'], target_train['str'], target_test['str'] = TL.RPA_stretch(source['rct'], target_train['rct'], target_test['rct'])
+        source['rot'], target_train['rot'], target_test['rot'] = TL.RPA_rotate(source['str'], target_train['str'], target_test['str'])
+
+        # get classification scores
+        # scores['clb'].append(TL.get_score_calibration(clf, target_train['org'], target_test['org']))
+        # for meth in source.keys():
+        #     scores[meth].append(TL.get_score_transferlearning(clf, source[meth], target_train[meth], target_test[meth]))
+
+        
+        for meth in source.keys():
+            source[meth]['ts']       = TangentSpace().fit_transform(source[meth]['covs'])
+            target_train[meth]['ts'] = TangentSpace().fit_transform(target_train[meth]['covs'])
+            target_test[meth]['ts']  = TangentSpace().fit_transform(target_test[meth]['covs'])
+            
+            if meth == 'clb':
+                # get the classificaion scores
+                scores['clb'].append(TL.get_tangent_space_score_calibration(clf, target_train[meth], target_test[meth]))
+            else:
+                scores[meth].append(TL.get_tangent_space_score_transferlearning(clf, source[meth], target_train[meth], target_test[meth]))
+            
+    # print the scores
+    for meth in scores.keys():
+        print(meth, np.mean(scores[meth]), np.std(scores[meth]))
 
 
+# Obtain accuracies for increasing number of training samples from the target dataset
+with skip_run('run', 'Transfer_learning_accuracy_improvement_by_increasing_training_samples') as check, check():
+    # load RM features
+    RM_data = dd.io.load(Path(__file__).parents[1] / config['RM_features_subjectwise'])
+    
+    # load TD features
+    TD_data = dd.io.load(Path(__file__).parents[1] / config['TD_features_subjectwise'])
+     
+    ### Prepare the source dataset
+    source_subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
+    # source_subjects = config['train_subjects']
+    source_TD       = []
+    source_RM       = []
+    source_cov      = []
+    source_labels   = []
+    
+    for subject in source_subjects:
+        for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+            TD  = TD_data['subject_' + subject][trial]['TD']
+            RM  = RM_data['subject_' + subject][trial]['RM']
+            cov = RM_data['subject_' + subject][trial]['cov']
+            y   = RM_data['subject_' + subject][trial]['labels']
 
+            if (trial == "LowFine") or (trial == "HighGross"):
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 165 out of them as these two classes are clubbed
+                id = np.arange(165)       
+            else:
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 330 out of them
+                id = np.arange(330)       
 
+            TD  = TD[id, :]
+            RM  = RM[id, :]
+            cov = cov[id, :, :]
+            y   = np.argmax(y[id, :], axis=1) + 1
 
-# plt.show()
+            source_TD.append(TD)
+            source_RM.append(RM)
+            source_cov.append(cov)
+            source_labels.append( y)
+        
+    Data = collections.defaultdict()
+    
+    Data['source_TD']     = np.concatenate(source_TD, axis=0)
+    Data['source_RM']     = np.concatenate(source_RM, axis=0)
+    Data['source_cov']    = np.concatenate(source_cov, axis=0)
+    Data['source_labels'] = np.concatenate(source_labels, axis=0)
+
+    ### Prepare the target dataset
+    target_subjects = config['test_subjects']
+    
+    score_coll = collections.defaultdict()
+    for N in tqdm(range(10, 51, 10)):
+        print(" -------- Accuracies reported for the number of samples N: {} -------- ".format(N))
+        target_TD       = []
+        target_RM       = []
+        target_cov      = []
+        target_labels   = []
+        
+        target_train_TD       = []
+        target_train_RM       = []
+        target_train_cov      = []
+        target_train_labels   = []
+        
+        for subject in target_subjects:
+            for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+                TD  = TD_data['subject_' + subject][trial]['TD']
+                RM  = RM_data['subject_' + subject][trial]['RM']
+                cov = RM_data['subject_' + subject][trial]['cov']
+                y   = RM_data['subject_' + subject][trial]['labels']
+
+                y  = np.argmax(y, axis=1) + 1 
+                
+                if (trial == "LowFine") or (trial == "HighGross"):
+                    # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 165 out of them as these two classes are clubbed
+                    id = np.arange(int(N/2), 165)       
+                else:
+                    # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 330 out of them
+                    id = np.arange(N, 330)       
+
+                TD  = TD[id, :]
+                RM  = RM[id, :]
+                cov = cov[id, :, :]
+                y   =  y[id]
+
+                target_TD.append(TD)
+                target_RM.append(RM)
+                target_cov.append(cov)
+                target_labels.append( y)
+                
+                # training data from target
+                target_train_TD.append(TD[:N, :])
+                target_train_RM.append(RM[:N, :])
+                target_train_cov.append(cov[:N, :, :])
+                target_train_labels.append(y[:N])
+            
+        Data['target_TD']     = np.concatenate(target_TD, axis=0)
+        Data['target_RM']     = np.concatenate(target_RM, axis=0)
+        Data['target_cov']    = np.concatenate(target_cov, axis=0)
+        Data['target_labels'] = np.concatenate(target_labels, axis=0)
+        
+        Data['target_train_TD']     = np.concatenate(target_train_TD, axis=0)
+        Data['target_train_RM']     = np.concatenate(target_train_RM, axis=0)
+        Data['target_train_cov']    = np.concatenate(target_train_cov, axis=0)
+        Data['target_train_labels'] = np.concatenate(target_train_labels, axis=0)
+        
+            
+        source_RM       = Data['source_RM']
+        source_TD       = Data['source_TD']
+        source_labels   = Data['source_labels']
+        target_RM       = Data['target_RM']
+        target_TD       = Data['target_TD']
+        target_labels   = Data['target_labels']
+        
+        source_covest   = Data['source_cov']
+        target_covest   = Data['target_cov']
+        
+        # classifier 
+        clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+    
+        if N == 0:
+            print("SVM inter-session accuracy using Tangent Space:{}".format(clf.fit(source_RM, source_labels).score(target_RM, target_labels)))
+            print("SVM inter-session accuracy using Hudgins features:{}".format(clf.fit(source_TD, source_labels).score(target_TD, target_labels)))
+        
+        else:
+            # use the part of target data for training 
+            source_RM       = np.concatenate((source_RM, Data['target_train_RM']), axis=0)
+            source_TD       = np.concatenate((source_TD, Data['target_train_TD']), axis=0)
+            source_labels   = np.concatenate((source_labels, Data['target_train_labels']), axis=0)
+            
+            print("SVM retrain ({} samples) inter-session accuracy using Tangent Space:{}".format(N, clf.fit(source_RM, source_labels).score(target_RM, target_labels)))
+            print("SVM retrain ({} samples) inter-session accuracy using Hudgins features:{}".format(N, clf.fit(source_TD, source_labels).score(target_TD, target_labels)))
+                
+            features_source = Data['source_cov']
+            labels_source   = Data['source_labels']
+            features_target = Data['target_cov']
+            labels_target   = Data['target_labels']
+            
+            print('Source Class1: {}, Class2: {}, Class3: {}'.format(len(labels_source[labels_source == 1]), len(labels_source[labels_source == 2]), len(labels_source[labels_source == 3])))
+            
+            print('Target Class1: {}, Class2: {}, Class3: {}'.format(len(labels_target[labels_target == 1]), len(labels_target[labels_target == 2]), len(labels_target[labels_target == 3])))
+            
+            # Number of datapoints from session 2 to be considered for training
+            ncovs_target_train = 10
+            data_source       = {}
+            data_target       = {}
+            data_target_train = {}
+            
+            # prepare the source data from session 1
+            data_source['covs']   = features_source
+            data_source['labels'] = labels_source
+
+            # prepare the target data from session 2
+            data_target['covs']   = features_target
+            data_target['labels'] = labels_target
+
+            # prepare training dataset from session 2
+            data_target_train['covs']  = Data['target_train_cov']
+            data_target_train['labels']= Data['target_train_labels']
+            
+            # setup the scores dictionary
+            scores = {}
+            for meth in ['org', 'rct', 'str', 'rot', 'clb']:
+                scores[meth] = []
+
+            # run the transfer learning for 5 times 
+    #         for i in tqdm(range(5)):
+    #             # apply RPA to multiple random partitions for the training dataset
+    #             clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+                
+    #             source = {}
+    #             target_train = {}
+    #             target_test = {}
+
+    #             # source['org'], target_train['org'], target_test['org'] = TL.get_sourcetarget_split(data_source, data_target, ncovs_target_train, paradigm='MI')
+    #             source['org'] = data_source
+    #             target_train['org'] = data_target_train
+    #             target_test['org'] = data_target
+                
+    #             # apply RPA 
+    #             source['rct'], target_train['rct'], target_test['rct'] = TL.RPA_recenter(source['org'], target_train['org'], target_test['org'])
+    #             source['str'], target_train['str'], target_test['str'] = TL.RPA_stretch(source['rct'], target_train['rct'], target_test['rct'])
+    #             source['rot'], target_train['rot'], target_test['rot'] = TL.RPA_rotate(source['str'], target_train['str'], target_test['str'])
+
+    #             # get the calibration scores
+    #             target_train['org']['ts'] = TangentSpace().fit_transform(target_train['org']['covs'])
+    #             target_test['org']['ts']  = TangentSpace().fit_transform(target_test['org']['covs'])
+    #             temp_score = TL.get_tangent_space_score_calibration(clf, target_train['org'], target_test['org'])
+    #             scores['clb'].append(temp_score)
+                
+    #             for meth in source.keys():
+    #                 source[meth]['ts']       = TangentSpace().fit_transform(source[meth]['covs'])
+    #                 target_train[meth]['ts'] = TangentSpace().fit_transform(target_train[meth]['covs'])
+    #                 target_test[meth]['ts']  = TangentSpace().fit_transform(target_test[meth]['covs'])
+                    
+    #                 scores[meth].append(TL.get_tangent_space_score_transferlearning(clf, source[meth], target_train[meth], target_test[meth]))
+            
+    #         score_coll[str(N)] = scores 
+    #         # print the scores
+    #         for meth in scores.keys():
+    #             print(meth, np.mean(scores[meth]), np.std(scores[meth]))
+            
+    # dd.io.save(str(Path(__file__).parents[1] / config['scores_RPA']), score_coll)
+
+with skip_run('skip', 'Plot_transfer_learning_accuracies_wrt_#_of_samples_from_file') as check, check():
+    scores = dd.io.load(str(Path(__file__).parents[1] / config['scores_RPA']))
+    
+    clb_scores = {}
+    tl_scores  = {}
+    
+    clb_scores['mean'] = []
+    clb_scores['std']  = []
+    tl_scores['mean'] = []
+    tl_scores['std']  = []
+    
+    plt.figure()
+    for N in range(10, 51, 10):
+        print(scores[str(N)]['clb'])
+        clb_scores['mean'].append(np.mean(scores[str(N)]['clb']))
+        clb_scores['std'].append(np.std(scores[str(N)]['clb']))
+        tl_scores['mean'].append(np.mean(scores[str(N)]['rot']))
+        tl_scores['std'].append(np.std(scores[str(N)]['rot']))
+    
+    n_samples = np.arange(10, 51, 10)
+    # plt.plot(n_samples, clb_scores['mean'], 'r')
+    # plt.plot(n_samples, tl_scores['mean'], 'b')
+
+with skip_run('skip', 'Plot_transfer_learning_accuracies_wrt_#_of_samples') as check, check():
+
+    # reported accuracies 
+    score_base    = {}
+    score_retrain = {}
+    score_tl      = {}
+    
+    score_base['RM'] = [54.54, 54.54, 54.54, 54.54, 54.54]
+    score_base['TD'] = [63.17, 63.17, 63.17, 63.17, 63.17]
+    
+    score_retrain['RM'] = [56.31, 59.35, 61.46, 62.32, 63.83]
+    score_retrain['TD'] = [63.60, 63.97, 64.62, 65.01, 65.02]
+    
+    score_tl['RM'] = [71.01, 73.54, 75.26, 77.67, 77.73]
+    
+    sample_keys = np.arange(10, 51, 10)
+    
+    plt.figure()
+    plt.plot(sample_keys, score_base['RM'], 'k-.', label='M1')
+    # plt.plot(sample_keys, score_base['TD'], 'b-.',label='M1 TD')
+    plt.plot(sample_keys, score_retrain['RM'], 'b--', label='M2')
+    # plt.plot(sample_keys, score_retrain['TD'], 'b--', label='M2 TD')
+    plt.plot(sample_keys, score_tl['RM'], 'r-', label='M3')
+    
+    plt.legend()
+    # plt.xlabel('# of samples from $T_l$')
+    # plt.ylabel('% Accuracy')
+    # plt.rc('axes', labelsize=50) 
+    plt.rc('legend', fontsize=15)
+    plt.grid()
+    plt.tight_layout()
+    
+      
+# use it for the later part of the paper
+with skip_run('skip', 'Calculate_inter-session_accuracy_of_each_subject_using_transfer_learning') as check, check():
+    # number of samples from target to be used for training
+    N = 20
+    
+    # load RM features
+    RM_data = dd.io.load(Path(__file__).parents[1] / config['RM_features_subjectwise'])
+    
+    # load TD features
+    TD_data = dd.io.load(Path(__file__).parents[1] / config['TD_features_subjectwise'])
+    
+    ### Prepare the source dataset
+    source_subjects = list(set(config['subjects']) ^ set(config['test_subjects']))
+    # source_subjects = config['train_subjects']
+    source_TD       = []
+    source_RM       = []
+    source_cov      = []
+    source_labels   = []
+    
+    for subject in source_subjects:
+        for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+            TD  = TD_data['subject_' + subject][trial]['TD']
+            RM  = RM_data['subject_' + subject][trial]['RM']
+            cov = RM_data['subject_' + subject][trial]['cov']
+            y   = RM_data['subject_' + subject][trial]['labels']
+
+            if (trial == "LowFine") or (trial == "HighGross"):
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 165 out of them as these two classes are clubbed
+                id = np.arange(165)       
+            else:
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 330 out of them
+                id = np.arange(330)       
+
+            TD  = TD[id, :]
+            RM  = RM[id, :]
+            cov = cov[id, :, :]
+            y   = np.argmax(y[id, :], axis=1) + 1
+
+            source_TD.append(TD)
+            source_RM.append(RM)
+            source_cov.append(cov)
+            source_labels.append( y)
+        
+    Data = collections.defaultdict()
+    
+    Data['source_TD']     = np.concatenate(source_TD, axis=0)
+    Data['source_RM']     = np.concatenate(source_RM, axis=0)
+    Data['source_cov']    = np.concatenate(source_cov, axis=0)
+    Data['source_labels'] = np.concatenate(source_labels, axis=0)
+
+    ### Prepare the target dataset
+    target_subjects = config['test_subjects']
+        
+    SCORES = collections.defaultdict()
+    
+    for subject in target_subjects:
+        print('-------------Subject id: {}-----------'.format(subject))
+        scores_noTL = collections.defaultdict()
+        
+        target_TD       = []
+        target_RM       = []
+        target_cov      = []
+        target_labels   = []
+        
+        target_train_TD       = []
+        target_train_RM       = []
+        target_train_cov      = []
+        target_train_labels   = []
+    
+        for trial in (set(config['trials']) ^ set(config['comb_trials'])):  
+            TD  = TD_data['subject_' + subject][trial]['TD']
+            RM  = RM_data['subject_' + subject][trial]['RM']
+            cov = RM_data['subject_' + subject][trial]['cov']
+            y   = RM_data['subject_' + subject][trial]['labels']
+
+            y  = np.argmax(y, axis=1) + 1 
+            
+            if (trial == "LowFine") or (trial == "HighGross"):
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 165 out of them as these two classes are clubbed
+                id = np.arange(int(N/2), 165)       
+            else:
+                # 1 sec and 0.5 overlap for 180 sec data = 360 points, use 330 out of them
+                id = np.arange(N, 330)       
+
+            TD  = TD[id, :]
+            RM  = RM[id, :]
+            cov = cov[id, :, :]
+            y   =  y[id]
+
+            target_TD.append(TD)
+            target_RM.append(RM)
+            target_cov.append(cov)
+            target_labels.append( y)
+            
+            # training data from target
+            target_train_TD.append(TD[:N, :])
+            target_train_RM.append(RM[:N, :])
+            target_train_cov.append(cov[:N, :, :])
+            target_train_labels.append(y[:N])
+        
+        Data['target_TD']     = np.concatenate(target_TD, axis=0)
+        Data['target_RM']     = np.concatenate(target_RM, axis=0)
+        Data['target_cov']    = np.concatenate(target_cov, axis=0)
+        Data['target_labels'] = np.concatenate(target_labels, axis=0)
+        
+        Data['target_train_TD']     = np.concatenate(target_train_TD, axis=0)
+        Data['target_train_RM']     = np.concatenate(target_train_RM, axis=0)
+        Data['target_train_cov']    = np.concatenate(target_train_cov, axis=0)
+        Data['target_train_labels'] = np.concatenate(target_train_labels, axis=0)
+        
+                    
+        source_RM       = Data['source_RM']
+        source_TD       = Data['source_TD']
+        source_labels   = Data['source_labels']
+        target_RM       = Data['target_RM']
+        target_TD       = Data['target_TD']
+        target_labels   = Data['target_labels']
+        
+        source_covest   = Data['source_cov']
+        target_covest   = Data['target_cov']
+        
+        source_cov = np.reshape(source_covest, (source_covest.shape[0], source_covest.shape[1] * source_covest.shape[2]), order='C')
+        source_cov = source_cov[:, 0:36]
+        
+        target_cov = np.reshape(target_covest, (target_covest.shape[0], target_covest.shape[1] * target_covest.shape[2]), order='C')
+        target_cov = target_cov[:, 0:36]
+    
+        # classifier 
+        clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+        
+        scores_noTL['train_RM'] = clf.fit(source_RM, source_labels).score(source_RM, source_labels)
+        scores_noTL['train_TD'] = clf.fit(source_TD, source_labels).score(source_TD, source_labels)
+        
+        scores_noTL['test_RM'] = clf.fit(source_RM, source_labels).score(target_RM, target_labels)
+        scores_noTL['test_TD'] = clf.fit(source_TD, source_labels).score(target_TD, target_labels)
+        
+        scores_noTL['retest_RM'] = clf.fit(source_RM, source_labels).score(target_RM, target_labels)
+        scores_noTL['retest_TD'] = clf.fit(source_TD, source_labels).score(target_TD, target_labels)
+        
+        print("SVM training accuracy using Tangent Space:{}".format(scores_noTL['train_RM']))
+        print("SVM training accuracy using Hudgins features:{}".format(scores_noTL['train_TD']))
+        
+        print("SVM inter-session accuracy using Tangent Space:{}".format(scores_noTL['test_RM']))
+        print("SVM inter-session accuracy using Hudgins features:{}".format(scores_noTL['test_TD']))
+    
+        # use the part of target Data for training 
+        source_RM       = np.concatenate((source_RM, Data['target_train_RM']), axis=0)
+        source_TD       = np.concatenate((source_TD, Data['target_train_TD']), axis=0)
+        source_labels   = np.concatenate((source_labels, Data['target_train_labels']), axis=0)
+        
+        # print("SVM retrain ({} samples) inter-session accuracy using Covariances:{}".format(N, clf.fit(source_cov, source_labels).score(target_cov, target_labels)))
+        print("SVM retrain ({} samples) inter-session accuracy using Tangent Space:{}".format(N, scores_noTL['retest_RM']))
+        print("SVM retrain ({} samples) inter-session accuracy using Hudgins features:{}".format(N, scores_noTL['retest_TD']))
+        
+        features_source = Data['source_cov']
+        labels_source   = Data['source_labels']
+        features_target = Data['target_cov']
+        labels_target   = Data['target_labels']
+        
+        print('Source Class1: {}, Class2: {}, Class3: {}'.format(len(labels_source[labels_source == 1]), len(labels_source[labels_source == 2]), len(labels_source[labels_source == 3])))
+        
+        print('Target Class1: {}, Class2: {}, Class3: {}'.format(len(labels_target[labels_target == 1]), len(labels_target[labels_target == 2]), len(labels_target[labels_target == 3])))
+        
+        # Number of Datapoints from session 2 to be considered for training
+        ncovs_target_train = 10
+        data_source       = {}
+        data_target       = {}
+        data_target_train = {}
+    
+        # prepare the source data from session 1
+        data_source['covs']   = features_source
+        data_source['labels'] = labels_source
+
+        # prepare the target data from session 2
+        data_target['covs']   = features_target
+        data_target['labels'] = labels_target
+
+        # prepare training dataset from session 2
+        data_target_train['covs']  = data['target_train_cov']
+        data_target_train['labels']= data['target_train_labels']
+        
+        # setup the scores dictionary
+        scores = {}
+        for meth in ['org', 'rct', 'str', 'rot']:
+            scores[meth] = []
+
+        # run the transfer learning for 5 times 
+        for i in tqdm(range(5)):
+            # apply RPA to multiple random partitions for the training dataset
+            clf = SVC(kernel='rbf', gamma='auto', decision_function_shape ='ovr',probability=True)
+            
+            source = {}
+            target_train = {}
+            target_test = {}
+
+            # source['org'], target_train['org'], target_test['org'] = TL.get_sourcetarget_split(data_source, data_target, ncovs_target_train, paradigm='MI')
+            source['org'] = data_source
+            target_train['org'] = data_target_train
+            target_test['org'] = data_target
+            
+            # apply RPA 
+            source['rct'], target_train['rct'], target_test['rct'] = TL.RPA_recenter(source['org'], target_train['org'], target_test['org'])
+            source['str'], target_train['str'], target_test['str'] = TL.RPA_stretch(source['rct'], target_train['rct'], target_test['rct'])
+            source['rot'], target_train['rot'], target_test['rot'] = TL.RPA_rotate(source['str'], target_train['str'], target_test['str'])
+
+            for meth in source.keys():
+                source[meth]['ts']       = TangentSpace().fit_transform(source[meth]['covs'])
+                target_train[meth]['ts'] = TangentSpace().fit_transform(target_train[meth]['covs'])
+                target_test[meth]['ts']  = TangentSpace().fit_transform(target_test[meth]['covs'])
+                
+                scores[meth].append(TL.get_tangent_space_score_transferlearning(clf, source[meth], target_train[meth], target_test[meth]))
+                
+        # print the scores
+        for meth in scores.keys():
+            print(meth, np.mean(scores[meth]), np.std(scores[meth]))
+        
+        SCORES[subject] = {'scores_noTL': scores_noTL, 'scores_TL' : scores} 
+    
+    dd.io.save(str(Path(__file__).parents[1] / config['scores_RPA']), SCORES)
+    
+plt.show()

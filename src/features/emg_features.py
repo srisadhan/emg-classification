@@ -18,6 +18,7 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 import matplotlib.pyplot as plt
 import sys
 import copy
+from tqdm import tqdm 
 
 def sampEntropy(rawEMGSignal):
     """
@@ -61,7 +62,7 @@ def extract_emg_features(data, config, scale=False):
 
     Data = collections.defaultdict(dict)    
 
-    for subject in config['subjects']:
+    for subject in tqdm(config['subjects']):
         emg_vec    = data['subject_'+subject]['EMG']
         labels     = data['subject_'+subject]['labels']
 
